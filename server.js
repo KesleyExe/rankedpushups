@@ -14,15 +14,17 @@ const io = new Server(server, {
   transports: ["websocket", "polling"]
 });
 
-app.use(express.static(path.join(__dirname, "public")));
+// Serve static assets from the root directory
+app.use(express.static(__dirname));
 
-// Redirect root domain "/" to "/app" to prevent "Cannot GET /" on Render
+// Redirect root domain "/" to "/app"
 app.get("/", (req, res) => {
   res.redirect("/app");
 });
 
+// Serve app.html directly from the root directory
 app.get("/app", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "app.html"));
+  res.sendFile(path.join(__dirname, "app.html"));
 });
 
 // ===================== DATA STORES =====================
