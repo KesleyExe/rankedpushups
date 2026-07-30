@@ -1,0 +1,21 @@
+{
+  "name": "pushup-arena",
+  "version": "1.0.0",
+  "description": "1v1 push-up competition with AI pose detection and ELO ranking",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": ["fitness", "push-ups", "elo", "competition", "pose-detection", "tensorflow"],
+  "author": "",
+  "license": "MIT"
+}

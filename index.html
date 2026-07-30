@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Push-up Arena — 1v1 Push-up Competitions</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0a0a0c;
+      --surface: #131316;
+      --surface-raised: #1a1a1e;
+      --border: #2a2a2e;
+      --text-primary: #f5f5f5;
+      --text-secondary: #a1a1aa;
+      --text-tertiary: #71717a;
+      --accent: #3b82f6;
+      --positive: #22c55e;
+      --danger: #ef4444;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      overflow: hidden;
+    }
+    .landing {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      text-align: center;
+      position: relative;
+    }
+    .landing-bg {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 50% 0%, rgba(59,130,246,0.08) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .landing-content {
+      position: relative;
+      z-index: 1;
+      max-width: 480px;
+      width: 100%;
+    }
+    .logo-big {
+      width: 72px;
+      height: 72px;
+      border-radius: 20px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      color: var(--text-primary);
+    }
+    .landing h1 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .tagline {
+      font-size: 16px;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+      line-height: 1.5;
+    }
+    .camera-preview-box {
+      width: 100%;
+      max-width: 360px;
+      aspect-ratio: 4/3;
+      background: var(--surface);
+      border: 2px dashed var(--border);
+      border-radius: 16px;
+      margin: 0 auto 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.3s;
+    }
+    .camera-preview-box.has-video {
+      border-color: var(--positive);
+      border-style: solid;
+    }
+    .camera-preview-box video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      display: none;
+    }
+    .camera-preview-box.has-video video {
+      display: block;
+    }
+    .camera-preview-box .preview-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-tertiary);
+    }
+    .camera-preview-box.has-video .preview-placeholder {
+      display: none;
+    }
+    .preview-placeholder svg {
+      opacity: 0.5;
+    }
+    .preview-placeholder span {
+      font-size: 14px;
+    }
+    .camera-status {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      backdrop-filter: blur(4px);
+      white-space: nowrap;
+      z-index: 2;
+    }
+    .camera-status.success {
+      color: var(--positive);
+    }
+    .camera-status.error {
+      color: var(--danger);
+    }
+    .name-input {
+      width: 100%;
+      max-width: 360px;
+      padding: 14px 18px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+      color: var(--text-primary);
+      font-size: 16px;
+      font-family: inherit;
+      outline: none;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .name-input:focus {
+      border-color: var(--accent);
+    }
+    .name-input::placeholder {
+      color: var(--text-tertiary);
+    }
+    .btn-start {
+      width: 100%;
+      max-width: 360px;
+      padding: 16px;
+      border: none;
+      border-radius: 12px;
+      background: var(--text-primary);
+      color: var(--bg);
+      font-size: 17px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-bottom: 24px;
+    }
+    .btn-start:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
+    .btn-start:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .features {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .feature {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-tertiary);
+    }
+    .feature-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--positive);
+    }
+    .error-msg {
+      color: var(--danger);
+      font-size: 13px;
+      margin-bottom: 12px;
+      max-width: 360px;
+    }
+    .loading-dots {
+      display: inline-flex;
+      gap: 3px;
+    }
+    .loading-dots span {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--text-secondary);
+      animation: bounce 1.4s infinite ease-in-out both;
+    }
+    .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+    .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0); }
+      40% { transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <div class="landing">
+    <div class="landing-bg"></div>
+    <div class="landing-content">
+      <div class="logo-big">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+      </div>
+      <h1>Push-up Arena</h1>
+      <p class="tagline">1v1 live push-up competitions. AI counts your reps. Climb the ELO ladder.</p>
+
+      <div class="camera-preview-box" id="preview-box">
+        <video id="preview-video" autoplay playsinline muted></video>
+        <div class="preview-placeholder">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+          <span>Camera preview</span>
+        </div>
+        <div class="camera-status" id="camera-status">Click start to enable camera</div>
+      </div>
+
+      <div class="error-msg" id="error-msg" style="display:none;"></div>
+
+      <input type="text" class="name-input" id="input-name" placeholder="Enter your name" maxlength="16" autocomplete="off">
+      <button class="btn-start" id="btn-start">Start competing</button>
+
+      <div class="features">
+        <div class="feature"><div class="feature-dot"></div>AI rep counting</div>
+        <div class="feature"><div class="feature-dot"></div>Live matchmaking</div>
+        <div class="feature"><div class="feature-dot"></div>ELO rankings</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const previewVideo = document.getElementById('preview-video');
+    const previewBox = document.getElementById('preview-box');
+    const cameraStatus = document.getElementById('camera-status');
+    const errorMsg = document.getElementById('error-msg');
+    const btnStart = document.getElementById('btn-start');
+    const inputName = document.getElementById('input-name');
+    let cameraStream = null;
+    let cameraReady = false;
+
+    // Check HTTPS (required for camera)
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+      cameraStatus.textContent = 'HTTPS required for camera';
+      cameraStatus.classList.add('error');
+    }
+
+    async function startPreview() {
+      try {
+        cameraStatus.innerHTML = '<span class="loading-dots"><span></span><span></span><span></span></span> Requesting camera...';
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: false
+        });
+        cameraStream = stream;
+        previewVideo.srcObject = stream;
+        await previewVideo.play();
+        previewBox.classList.add('has-video');
+        cameraStatus.textContent = 'Camera active ✓';
+        cameraStatus.classList.add('success');
+        cameraReady = true;
+        return true;
+      } catch (err) {
+        console.error('Camera error:', err);
+        cameraStatus.textContent = 'Camera blocked — manual mode';
+        cameraStatus.classList.add('error');
+        errorMsg.style.display = 'block';
+        errorMsg.textContent = 'Camera access denied. You can still play with manual counting (spacebar or tap).';
+        cameraReady = false;
+        return false;
+      }
+    }
+
+    // Auto-request camera on load (with delay so user sees the page first)
+    setTimeout(() => {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        startPreview();
+      } else {
+        cameraStatus.textContent = 'Camera not supported';
+        cameraStatus.classList.add('error');
+      }
+    }, 500);
+
+    btnStart.addEventListener('click', () => {
+      const name = inputName.value.trim();
+      if (!name) {
+        inputName.style.borderColor = 'var(--danger)';
+        setTimeout(() => inputName.style.borderColor = '', 1000);
+        return;
+      }
+      // Store name and camera state, redirect to app
+      localStorage.setItem('arena_name', name);
+      localStorage.setItem('arena_camera', cameraReady ? '1' : '0');
+      window.location.href = '/app';
+    });
+
+    inputName.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') btnStart.click();
+    });
+  </script>
+</body>
+</html>
