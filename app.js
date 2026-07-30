@@ -15,108 +15,7 @@ const state = {
   manualReps: 0,
   connectionAttempts: 0,
   maxConnectionAttempts: 10,
-  peerConnection: null,
-  remoteStream: null
 };
-
-// WebRTC ICE Servers Configuration
-const rtcConfig = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
-  ]
-};
-
-// ===================== WEBRTC STREAMING =====================
-function initPeerConnection() {
-  closePeerConnection();
-
-  const pc = new RTCPeerConnection(rtcConfig);
-  state.peerConnection = pc;
-
-  // Add local stream tracks to PC
-  if (state.cameraStream) {
-    state.cameraStream.getTracks().forEach(track => {
-      pc.addTrack(track, state.cameraStream);
-    });
-  }
-
-  // Handle remote track arriving
-  pc.ontrack = (event) => {
-    console.log('[WebRTC] Received remote track');
-    state.remoteStream = event.streams[0];
-    const oppVideo = $('compete-opp-video');
-    const oppPlaceholder = $('compete-opp-placeholder');
-    if (oppVideo) {
-      oppVideo.srcObject = state.remoteStream;
-      oppVideo.play().catch(e => console.warn('[WebRTC] Remote video play error:', e));
-    }
-    if (oppPlaceholder) oppPlaceholder.style.display = 'none';
-  };
-
-  // Send ICE candidates through socket
-  pc.onicecandidate = (event) => {
-    if (event.candidate && state.match && state.socket) {
-      state.socket.emit('webrtc:signal', {
-        matchId: state.match.id,
-        signal: { type: 'candidate', candidate: event.candidate }
-      });
-    }
-  };
-
-  return pc;
-}
-
-async function createWebRTCOffer() {
-  try {
-    const pc = initPeerConnection();
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    state.socket.emit('webrtc:signal', {
-      matchId: state.match.id,
-      signal: { type: 'offer', offer }
-    });
-  } catch (err) {
-    console.error('[WebRTC] Offer creation failed:', err);
-  }
-}
-
-async function handleWebRTCSignal({ signal }) {
-  if (!state.peerConnection) {
-    initPeerConnection();
-  }
-  const pc = state.peerConnection;
-
-  try {
-    if (signal.type === 'offer') {
-      await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      state.socket.emit('webrtc:signal', {
-        matchId: state.match.id,
-        signal: { type: 'answer', answer }
-      });
-    } else if (signal.type === 'answer') {
-      await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
-    } else if (signal.type === 'candidate') {
-      await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-    }
-  } catch (err) {
-    console.error('[WebRTC] Signaling error:', err);
-  }
-}
-
-function closePeerConnection() {
-  if (state.peerConnection) {
-    state.peerConnection.close();
-    state.peerConnection = null;
-  }
-  state.remoteStream = null;
-  const oppVideo = $('compete-opp-video');
-  const oppPlaceholder = $('compete-opp-placeholder');
-  if (oppVideo) oppVideo.srcObject = null;
-  if (oppPlaceholder) oppPlaceholder.style.display = 'flex';
-}
 
 // ===================== DOM HELPERS =====================
 function $(id) { return document.getElementById(id); }
@@ -200,12 +99,7 @@ async function startCamera() {
     if (video) {
       video.srcObject = stream;
       await video.play();
-    }
-
-    const mainYourVideo = $('compete-your-video');
-    if (mainYourVideo) {
-      mainYourVideo.srcObject = stream;
-      await mainYourVideo.play();
+      console.log('[Camera] Video playing');
     }
 
     const canvas = $('sidebar-canvas');
@@ -231,8 +125,6 @@ function stopCamera() {
   }
   const video = $('sidebar-video');
   if (video) video.srcObject = null;
-  const mainYourVideo = $('compete-your-video');
-  if (mainYourVideo) mainYourVideo.srcObject = null;
 }
 
 // ===================== AI / POSE DETECTOR =====================
@@ -338,7 +230,6 @@ function connect() {
   socket.on('disconnect', (reason) => {
     console.log('[Socket] Disconnected:', reason);
     state.isRegistered = false;
-    closePeerConnection();
     if (state.phase !== 'ended' && state.phase !== 'idle') {
       state.phase = 'idle';
       showScreen('home');
@@ -418,16 +309,7 @@ function connect() {
     if (state.poseDetector) state.poseDetector.resetReps();
     state.manualReps = 0;
 
-    // Initiate WebRTC connection from Player 1
-    if (youAre === 'p1') {
-      createWebRTCOffer();
-    }
-
     showScreen('ready');
-  });
-
-  socket.on('webrtc:signal', (data) => {
-    handleWebRTCSignal(data);
   });
 
   socket.on('match:ready_update', ({ p1Ready, p2Ready, p1Name, p2Name }) => {
@@ -499,7 +381,6 @@ function connect() {
   socket.on('match:end', ({ yourReps, oppReps, yourEloChange, newElo, result, diff, opponentName, reason }) => {
     console.log('[Match] End', result, yourReps, 'vs', oppReps);
     state.phase = 'ended';
-    closePeerConnection();
     if (state.user) state.user.elo = newElo;
     localStorage.setItem('arena_elo', newElo);
 
@@ -638,13 +519,13 @@ function startBotRound(botElo) {
 
 function endBotMatch(myReps, botReps, botElo) {
   state.phase = 'ended';
-  closePeerConnection();
   const diff = myReps - botReps;
   let result;
   if (diff > 0) result = 'win';
   else if (diff < 0) result = 'loss';
   else result = 'tie';
 
+  // Bot matches do NOT affect ELO
   const currentElo = state.user?.elo || parseInt(localStorage.getItem('arena_elo')) || 800;
 
   const ry = $('res-your');
@@ -831,7 +712,6 @@ function bindEvents() {
     if (state.match && state.socket) {
       state.socket.emit('match:forfeit', { matchId: state.match.id });
     }
-    closePeerConnection();
     state.phase = 'idle';
     showScreen('home');
   });
@@ -847,12 +727,10 @@ function bindEvents() {
     if (state.match && state.socket) {
       state.socket.emit('match:forfeit', { matchId: state.match.id });
     }
-    closePeerConnection();
   });
 
   const ba = $('btn-again');
   if (ba) ba.addEventListener('click', () => {
-    closePeerConnection();
     state.phase = 'idle';
     showScreen('home');
     fetchLeaderboard();
