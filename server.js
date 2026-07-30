@@ -14,17 +14,16 @@ const io = new Server(server, {
   transports: ["websocket", "polling"]
 });
 
-// Serve static assets from the "public" folder
-app.use(express.static(path.join(__dirname, "public")));
+// Serve static assets directly from the root directory
+app.use(express.static(__dirname));
 
 // ===================== ROUTE HANDLERS =====================
-// Fixes "Cannot GET /" by serving your main app page on root access
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "app.html"));
+  res.sendFile(path.join(__dirname, "index.html"));
 });
 
 app.get("/app", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "app.html"));
+  res.sendFile(path.join(__dirname, "app.html"));
 });
 
 // ===================== DATA STORES =====================
