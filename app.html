@@ -1,187 +1,49 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Push-up Arena</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <div id="app">
-    <!-- PERSISTENT LEFT SIDEBAR -->
-    <aside id="sidebar" class="sidebar">
-      <div class="sidebar-camera">
-        <video id="sidebar-video" autoplay playsinline muted></video>
-        <canvas id="sidebar-canvas"></canvas>
-        <div class="sidebar-camera-overlay">
-          <div class="sidebar-rep-count" id="sidebar-rep-count">0</div>
-          <div class="sidebar-phase" id="sidebar-phase">--</div>
-        </div>
-      </div>
-      <div class="sidebar-user">
-        <div class="sidebar-avatar" id="sidebar-avatar">?</div>
-        <div class="sidebar-info">
-          <div class="sidebar-name" id="sidebar-name">Loading...</div>
-          <div class="sidebar-elo" id="sidebar-elo">800 ELO</div>
-        </div>
-      </div>
-      <div class="sidebar-status" id="sidebar-status">
-        <span class="status-dot" id="status-dot"></span>
-        <span id="status-text">Connecting...</span>
-      </div>
-    </aside>
-
-    <!-- MAIN CONTENT AREA -->
-    <main id="main-content" class="main-content">
-      <!-- HOME -->
-      <section id="screen-home" class="screen active">
-        <header class="main-header">
-          <h2>Push-up Arena</h2>
-          <div class="elo-pill">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-            <span id="home-elo">800</span>
-          </div>
-        </header>
-        <div class="content-body">
-          <div class="match-card">
-            <div class="pulse-ring">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            </div>
-            <h3>Find an opponent</h3>
-            <p>Match with someone at your skill level</p>
-            <button id="btn-match" class="btn btn-primary" disabled>Connecting...</button>
-            <button id="btn-bot" class="btn btn-secondary">Practice vs Bot</button>
-          </div>
-          <div class="panel">
-            <div class="panel-header">
-              <h4>Leaderboard</h4>
-              <span class="panel-meta" id="leaderboard-count">Top 20</span>
-            </div>
-            <div id="leaderboard-list" class="leaderboard"></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header">
-              <h4>Live Stats</h4>
-            </div>
-            <div class="stats-grid">
-              <div class="stat-box"><div class="stat-value" id="stat-online">0</div><div class="stat-label">online</div></div>
-              <div class="stat-box"><div class="stat-value" id="stat-queue">0</div><div class="stat-label">in queue</div></div>
-              <div class="stat-box"><div class="stat-value" id="stat-active">0</div><div class="stat-label">active</div></div>
-              <div class="stat-box"><div class="stat-value" id="stat-total">0</div><div class="stat-label">matches</div></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- MATCHING -->
-      <section id="screen-matching" class="screen">
-        <div class="matching-center">
-          <div class="pulse-ring large">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-          </div>
-          <h3>Finding opponent...</h3>
-          <p class="match-range">ELO range: <span id="match-range">±50</span></p>
-          <div class="match-stats">
-            <span id="queue-count">0 in queue</span>
-            <span>·</span>
-            <span id="active-matches">0 active</span>
-          </div>
-          <div class="match-progress">
-            <div class="match-progress-bar" id="match-progress-bar"></div>
-          </div>
-          <button id="btn-cancel" class="btn">Cancel</button>
-        </div>
-      </section>
-
-      <!-- READY CHECK -->
-      <section id="screen-ready" class="screen">
-        <div class="ready-center">
-          <h3>Match found!</h3>
-          <p class="ready-vs">You <span>vs</span> <strong id="ready-opp-name">Opponent</strong></p>
-          <div class="ready-players">
-            <div class="ready-player" id="ready-you">
-              <div class="ready-dot" id="ready-dot-you"></div>
-              <span>You</span>
-            </div>
-            <div class="ready-player" id="ready-opp">
-              <div class="ready-dot" id="ready-dot-opp"></div>
-              <span id="ready-opp-name2">Opponent</span>
-            </div>
-          </div>
-          <div class="ready-status" id="ready-status">Get into push-up position...</div>
-          <div class="ready-hint" id="ready-hint">The AI will detect when you're ready. Hold the plank position with hands on the ground.</div>
-          <button id="btn-ready-confirm" class="btn btn-primary" disabled>Waiting for position...</button>
-          <button id="btn-ready-cancel" class="btn btn-ghost">Leave match</button>
-        </div>
-      </section>
-
-      <!-- COMPETE -->
-      <section id="screen-compete" class="screen">
-        <div class="compete-main">
-          <div class="compete-timer-box">
-            <div class="compete-timer" id="compete-timer">60</div>
-            <div class="compete-timer-label">seconds left</div>
-          </div>
-          <div class="compete-vs-bar">
-            <div class="compete-side">
-              <span class="compete-side-name" id="compete-your-name">You</span>
-              <span class="compete-side-reps" id="compete-your-reps">0</span>
-            </div>
-            <div class="compete-vs-divider">VS</div>
-            <div class="compete-side">
-              <span class="compete-side-name" id="compete-opp-name">Opponent</span>
-              <span class="compete-side-reps" id="compete-opp-reps">0</span>
-            </div>
-          </div>
-          <div class="compete-progress">
-            <div class="compete-progress-track">
-              <div class="compete-progress-you" id="compete-progress-you" style="width:50%"></div>
-              <div class="compete-progress-opp" id="compete-progress-opp" style="width:50%"></div>
-            </div>
-          </div>
-          <div class="compete-phase-display" id="compete-phase-display">GO!</div>
-          <button id="btn-forfeit" class="btn btn-ghost">Forfeit</button>
-        </div>
-      </section>
-
-      <!-- RESULT -->
-      <section id="screen-result" class="screen">
-        <div class="result-center">
-          <div class="result-hero">
-            <div class="result-icon" id="result-icon">🏆</div>
-            <h2 id="result-title">Victory!</h2>
-            <p id="result-sub">You crushed it</p>
-          </div>
-          <div class="result-card">
-            <div class="result-row"><span>Your push-ups</span><strong id="res-your">0</strong></div>
-            <div class="result-row"><span>Opponent push-ups</span><strong id="res-opp">0</strong></div>
-            <div class="result-row"><span>Difference</span><strong id="res-diff">0</strong></div>
-            <div class="result-row"><span>ELO change</span><strong id="res-elo-change" class="elo-positive">+0</strong></div>
-          </div>
-          <div class="new-elo-card">
-            <span class="new-elo-label">New ELO rating</span>
-            <span class="new-elo-value" id="res-new-elo">800</span>
-          </div>
-          <button id="btn-again" class="btn btn-primary">Play again</button>
-        </div>
-      </section>
-    </main>
-
-    <!-- LOADING OVERLAY -->
-    <div id="loading-overlay" class="loading-overlay">
-      <div class="loading-spinner"></div>
-      <p id="loading-text">Loading...</p>
+<div id="screen-compete" class="screen">
+  <div class="compete-main">
+    <div class="compete-timer-box">
+      <div class="compete-timer" id="compete-timer">60</div>
+      <div class="compete-timer-label">SECONDS REMAINING</div>
     </div>
 
-    <!-- ERROR TOAST -->
-    <div id="error-toast" class="error-toast">
-      <span id="error-text"></span>
-      <button id="error-close">×</button>
+    <!-- Side-by-Side Video Streams View -->
+    <div class="video-grid" style="display: flex; gap: 12px; width: 100%; margin: 12px 0;">
+      <!-- Local Player Stream -->
+      <div class="video-container" style="flex: 1; position: relative; background: var(--surface); border-radius: var(--radius-md); overflow: hidden; aspect-ratio: 4/3;">
+        <video id="compete-your-video" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1);"></video>
+        <div class="video-label" style="position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 2px 8px; border-radius: 4px; font-size: 12px;">You</div>
+      </div>
+      
+      <!-- Opponent Player Stream -->
+      <div class="video-container" style="flex: 1; position: relative; background: var(--surface); border-radius: var(--radius-md); overflow: hidden; aspect-ratio: 4/3;">
+        <video id="compete-opp-video" autoplay playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+        <div id="compete-opp-placeholder" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 13px;">
+          Waiting for opponent video...
+        </div>
+        <div class="video-label" style="position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 2px 8px; border-radius: 4px; font-size: 12px;" id="compete-opp-name">Opponent</div>
+      </div>
     </div>
+
+    <div class="compete-vs-bar">
+      <div class="compete-side">
+        <div class="compete-side-name" id="compete-your-name">You</div>
+        <div class="compete-side-reps" id="compete-your-reps">0</div>
+      </div>
+      <div class="compete-vs-divider">VS</div>
+      <div class="compete-side">
+        <div class="compete-side-name" id="compete-opp-name">Opponent</div>
+        <div class="compete-side-reps" id="compete-opp-reps">0</div>
+      </div>
+    </div>
+
+    <div class="compete-progress">
+      <div class="compete-progress-track">
+        <div class="compete-progress-you" id="compete-progress-you" style="width: 50%;"></div>
+        <div class="compete-progress-opp" id="compete-progress-opp" style="width: 50%;"></div>
+      </div>
+    </div>
+
+    <div class="compete-phase-display" id="compete-phase-display">GO!</div>
+
+    <button class="btn btn-secondary" id="btn-forfeit" style="max-width: 200px;">Forfeit Match</button>
   </div>
-
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="pose-detector.js"></script>
-  <script src="app.js"></script>
-</body>
-</html>
+</div>
