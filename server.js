@@ -14,15 +14,14 @@ const io = new Server(server, {
   transports: ["websocket", "polling"]
 });
 
-// Serve static assets from the root directory
+// Serve static assets directly from the root directory
 app.use(express.static(__dirname));
 
-// Redirect root domain "/" to "/app"
+// ===================== ROUTE HANDLERS =====================
 app.get("/", (req, res) => {
-  res.redirect("/app");
+  res.sendFile(path.join(__dirname, "index.html"));
 });
 
-// Serve app.html directly from the root directory
 app.get("/app", (req, res) => {
   res.sendFile(path.join(__dirname, "app.html"));
 });
@@ -81,17 +80,15 @@ class Match {
 
   startReadyCheck() {
     this.phase = "ready_check";
-    this.sendTo(this.p1.socketId, "match:ready_check", {
+    this.broadcast("match:ready_check", {
       matchId: this.id,
       opponent: this.getOpponentData(this.p1),
       youAre: "p1",
-      peerSocketId: this.p2.socketId
     });
-    this.sendTo(this.p2.socketId, "match:ready_check", {
+    this.broadcast("match:ready_check", {
       matchId: this.id,
       opponent: this.getOpponentData(this.p2),
       youAre: "p2",
-      peerSocketId: this.p1.socketId
     });
     console.log(`[Match ${this.id.slice(0,8)}] Ready check: ${this.p1.name} vs ${this.p2.name}`);
   }
@@ -283,11 +280,19 @@ io.on("connection", (socket) => {
 
   socket.on("queue:join", () => {
     const user = users.get(socket.id);
-    if (!user || user.inQueue || user.inMatch) return;
+    if (!user) {
+      console.log(`[Queue] Reject: user not registered (${socket.id})`);
+      return;
+    }
+    if (user.inQueue || user.inMatch) {
+      console.log(`[Queue] Reject: already in queue or match (${user.name})`);
+      return;
+    }
     user.inQueue = true;
     user.queueJoinedAt = Date.now();
     queue.push(socket.id);
     socket.emit("queue:joined");
+    console.log(`[Queue] Joined: ${user.name} (${socket.id}). Queue size: ${queue.length}`);
   });
 
   socket.on("queue:leave", () => {
@@ -298,6 +303,7 @@ io.on("connection", (socket) => {
     const idx = queue.indexOf(socket.id);
     if (idx > -1) queue.splice(idx, 1);
     socket.emit("queue:left");
+    console.log(`[Queue] Left: ${user.name}. Queue size: ${queue.length}`);
   });
 
   socket.on("match:ready", ({ matchId, ready }) => {
@@ -315,30 +321,10 @@ io.on("connection", (socket) => {
     if (match) match.forfeit(socket.id);
   });
 
-  // --- WebRTC Signaling ---
-  socket.on("signal:offer", ({ target, offer }) => {
-    io.to(target).emit("signal:offer", { sender: socket.id, offer });
-  });
-
-  socket.on("signal:answer", ({ target, answer }) => {
-    io.to(target).emit("signal:answer", { sender: socket.id, answer });
-  });
-
-  socket.on("signal:ice-candidate", ({ target, candidate }) => {
-    io.to(target).emit("signal:ice-candidate", { sender: socket.id, candidate });
-  });
-
-  socket.on('webrtc:signal', ({ matchId, signal }) => {
-  const match = activeMatches.get(matchId);
-  if (!match) return;
-
-  const recipientSocketId = socket.id === match.p1.socketId ? match.p2.socketId : match.p1.socketId;
-  io.to(recipientSocketId).emit('webrtc:signal', { signal });
-  });
-
   socket.on("disconnect", () => {
     const user = users.get(socket.id);
     if (user) {
+      console.log(`[Socket] Disconnected: ${user.name} (${socket.id})`);
       for (const [_, match] of matches) {
         if (match.phase !== "ended") {
           if (match.p1.socketId === socket.id || match.p2.socketId === socket.id) {
@@ -351,6 +337,8 @@ io.on("connection", (socket) => {
         if (idx > -1) queue.splice(idx, 1);
       }
       users.delete(socket.id);
+    } else {
+      console.log(`[Socket] Disconnected: ${socket.id} (unregistered)`);
     }
   });
 });
@@ -380,6 +368,7 @@ app.get("/api/stats", (req, res) => {
   });
 });
 
+// ===================== START SERVER =====================
 const PORT = process.env.PORT || 3000;
 
 function getLocalIp() {
