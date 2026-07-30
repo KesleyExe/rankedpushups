@@ -16,6 +16,11 @@ const io = new Server(server, {
 
 app.use(express.static(path.join(__dirname, "public")));
 
+// Redirect root domain "/" to "/app" to prevent "Cannot GET /" on Render
+app.get("/", (req, res) => {
+  res.redirect("/app");
+});
+
 app.get("/app", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "app.html"));
 });
