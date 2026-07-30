@@ -328,6 +328,14 @@ io.on("connection", (socket) => {
     io.to(target).emit("signal:ice-candidate", { sender: socket.id, candidate });
   });
 
+  socket.on('webrtc:signal', ({ matchId, signal }) => {
+  const match = activeMatches.get(matchId);
+  if (!match) return;
+
+  const recipientSocketId = socket.id === match.p1.socketId ? match.p2.socketId : match.p1.socketId;
+  io.to(recipientSocketId).emit('webrtc:signal', { signal });
+  });
+
   socket.on("disconnect", () => {
     const user = users.get(socket.id);
     if (user) {
