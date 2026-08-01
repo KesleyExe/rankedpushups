@@ -727,6 +727,92 @@ html, body {
   z-index: 1;
 }
 
+/* ========== COACHING INDICATOR ========== */
+.coaching-box {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.coaching-indicator {
+  font-size: 20px;
+  font-weight: 700;
+  padding: 8px 24px;
+  border-radius: var(--radius-full);
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  letter-spacing: 0.05em;
+}
+
+.coaching-indicator:empty {
+  opacity: 0;
+}
+
+.coach-down {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent-light);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  animation: coachPulse 0.8s ease-in-out infinite;
+}
+
+.coach-up {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--positive);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  animation: coachPulse 0.8s ease-in-out infinite;
+}
+
+@keyframes coachPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.depth-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.depth-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-strong);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.depth-bar-fill {
+  height: 100%;
+  width: 50%;
+  background: var(--text-quaternary);
+  border-radius: 3px;
+  transition: width 0.15s ease, background 0.2s ease;
+}
+
+.depth-bar-fill.depth-down {
+  background: var(--accent);
+}
+
+.depth-bar-fill.depth-up {
+  background: var(--positive);
+}
+
+.depth-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  min-width: 50px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .compete-vs-bar {
   display: flex;
   align-items: center;
@@ -983,7 +1069,7 @@ html, body {
   border-radius: 3px;
 }
 
-/* ========== MOBILE ========== */
+/* ========== PORTRAIT MOBILE ========== */
 @media (max-width: 768px) {
   #app {
     flex-direction: column;
@@ -1050,6 +1136,12 @@ html, body {
     padding: 12px;
     gap: 12px;
   }
+
+  .coaching-indicator {
+    font-size: 16px;
+    padding: 6px 16px;
+    min-height: 34px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1066,5 +1158,173 @@ html, body {
     font-size: 9px;
     bottom: 4px;
     left: 4px;
+  }
+  .coaching-indicator {
+    font-size: 14px;
+    padding: 5px 12px;
+  }
+}
+
+/* ========== LANDSCAPE MOBILE ========== */
+@media (max-height: 500px) and (orientation: landscape) {
+  #app {
+    flex-direction: row;
+  }
+
+  .sidebar {
+    width: 140px;
+    min-width: 140px;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    border-bottom: none;
+    padding: 0;
+  }
+
+  .sidebar-camera {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    border-radius: 0;
+  }
+
+  .sidebar-user {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 10px;
+  }
+
+  .sidebar-name {
+    font-size: 12px;
+  }
+
+  .sidebar-elo {
+    font-size: 10px;
+  }
+
+  .sidebar-status {
+    display: flex;
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+
+  .main-header {
+    padding: 8px 12px;
+  }
+
+  .main-header h2 {
+    font-size: 14px;
+  }
+
+  .content-body {
+    padding: 8px 12px;
+  }
+
+  .compete-main {
+    min-height: auto;
+    padding: 8px;
+    gap: 8px;
+    max-width: 100%;
+  }
+
+  .compete-timer {
+    font-size: 28px;
+  }
+
+  .compete-timer-label {
+    font-size: 9px;
+  }
+
+  .video-grid {
+    gap: 6px;
+    max-width: 520px;
+  }
+
+  .video-container {
+    aspect-ratio: 16 / 9;
+  }
+
+  .video-label {
+    font-size: 9px;
+    padding: 1px 5px;
+    bottom: 4px;
+    left: 4px;
+  }
+
+  .coaching-box {
+    gap: 4px;
+  }
+
+  .coaching-indicator {
+    font-size: 13px;
+    padding: 4px 14px;
+    min-height: 28px;
+  }
+
+  .depth-bar {
+    max-width: 300px;
+  }
+
+  .compete-vs-bar {
+    gap: 16px;
+  }
+
+  .compete-side-name {
+    font-size: 11px;
+  }
+
+  .compete-side-reps {
+    font-size: 22px;
+  }
+
+  .compete-progress {
+    max-width: 320px;
+  }
+
+  .compete-phase-display {
+    font-size: 11px;
+    padding: 3px 12px;
+  }
+
+  .btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  .matching-center {
+    min-height: auto;
+    padding: 16px;
+    gap: 12px;
+  }
+
+  .ready-center {
+    min-height: auto;
+    padding: 16px;
+    gap: 10px;
+  }
+
+  .ready-players {
+    gap: 24px;
+  }
+
+  .result-center {
+    min-height: auto;
+    padding: 16px;
+    gap: 12px;
+  }
+
+  .result-icon {
+    font-size: 36px;
+  }
+
+  .result-hero h2 {
+    font-size: 18px;
+  }
+
+  .new-elo-value {
+    font-size: 28px;
   }
 }
