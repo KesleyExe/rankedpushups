@@ -5,183 +5,242 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Push-up Arena</title>
   <link rel="stylesheet" href="style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="pose-detector.js" defer></script>
+  <script src="app.js" defer></script>
+<base target="_blank">
 </head>
 <body>
   <div id="app">
-    <!-- PERSISTENT LEFT SIDEBAR -->
-    <aside id="sidebar" class="sidebar">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
       <div class="sidebar-camera">
         <video id="sidebar-video" autoplay playsinline muted></video>
         <canvas id="sidebar-canvas"></canvas>
         <div class="sidebar-camera-overlay">
-          <div class="sidebar-rep-count" id="sidebar-rep-count">0</div>
           <div class="sidebar-phase" id="sidebar-phase">--</div>
+          <div class="sidebar-rep-count" id="sidebar-rep-count">0</div>
         </div>
       </div>
       <div class="sidebar-user">
-        <div class="sidebar-avatar" id="sidebar-avatar">?</div>
+        <div class="sidebar-avatar" id="sidebar-avatar">--</div>
         <div class="sidebar-info">
           <div class="sidebar-name" id="sidebar-name">Loading...</div>
-          <div class="sidebar-elo" id="sidebar-elo">800 ELO</div>
+          <div class="sidebar-elo" id="sidebar-elo">-- ELO</div>
         </div>
       </div>
-      <div class="sidebar-status" id="sidebar-status">
-        <span class="status-dot" id="status-dot"></span>
+      <div class="sidebar-status">
+        <div class="status-dot" id="status-dot"></div>
         <span id="status-text">Connecting...</span>
       </div>
     </aside>
 
-    <!-- MAIN CONTENT AREA -->
-    <main id="main-content" class="main-content">
-      <!-- HOME -->
-      <section id="screen-home" class="screen active">
-        <header class="main-header">
-          <h2>Push-up Arena</h2>
-          <div class="elo-pill">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-            <span id="home-elo">800</span>
-          </div>
-        </header>
-        <div class="content-body">
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+      <div class="main-header">
+        <h2>Push-up Arena</h2>
+        <div class="elo-pill" id="home-elo">0</div>
+      </div>
+
+      <div class="content-body">
+        <!-- HOME SCREEN -->
+        <div id="screen-home" class="screen active">
           <div class="match-card">
             <div class="pulse-ring">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
             </div>
-            <h3>Find an opponent</h3>
-            <p>Match with someone at your skill level</p>
-            <button id="btn-match" class="btn btn-primary" disabled>Connecting...</button>
-            <button id="btn-bot" class="btn btn-secondary">Practice vs Bot</button>
+            <h3>Find a Match</h3>
+            <p>Compete 1v1 against a real player. AI counts your reps.</p>
+            <button class="btn btn-primary" id="btn-match">Start matching</button>
+            <button class="btn btn-secondary" id="btn-bot">Practice vs Bot</button>
           </div>
+
           <div class="panel">
             <div class="panel-header">
               <h4>Leaderboard</h4>
-              <span class="panel-meta" id="leaderboard-count">Top 20</span>
+              <span class="panel-meta" id="leaderboard-count">Top 0</span>
             </div>
-            <div id="leaderboard-list" class="leaderboard"></div>
+            <div class="leaderboard" id="leaderboard-list">
+              <div class="leader-row">
+                <span style="color:var(--text-tertiary);font-size:13px;">Loading...</span>
+              </div>
+            </div>
           </div>
+
           <div class="panel">
             <div class="panel-header">
               <h4>Live Stats</h4>
             </div>
             <div class="stats-grid">
-              <div class="stat-box"><div class="stat-value" id="stat-online">0</div><div class="stat-label">online</div></div>
-              <div class="stat-box"><div class="stat-value" id="stat-queue">0</div><div class="stat-label">in queue</div></div>
-              <div class="stat-box"><div class="stat-value" id="stat-active">0</div><div class="stat-label">active</div></div>
-              <div class="stat-box"><div class="stat-value" id="stat-total">0</div><div class="stat-label">matches</div></div>
+              <div class="stat-box">
+                <div class="stat-value" id="stat-online">0</div>
+                <div class="stat-label">Online</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-value" id="stat-queue">0</div>
+                <div class="stat-label">In Queue</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-value" id="stat-active">0</div>
+                <div class="stat-label">Active</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-value" id="stat-total">0</div>
+                <div class="stat-label">Matches</div>
+              </div>
             </div>
           </div>
         </div>
-      </section>
 
-      <!-- MATCHING -->
-      <section id="screen-matching" class="screen">
-        <div class="matching-center">
-          <div class="pulse-ring large">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <!-- MATCHING SCREEN -->
+        <div id="screen-matching" class="screen">
+          <div class="matching-center">
+            <div class="pulse-ring large"></div>
+            <h3>Finding opponent...</h3>
+            <p class="match-range" id="match-range">±50</p>
+            <div class="match-progress">
+              <div class="match-progress-bar" id="match-progress-bar"></div>
+            </div>
+            <div class="match-stats">
+              <span id="queue-count">0 in queue</span>
+              <span style="color:var(--border);">|</span>
+              <span id="active-matches">0 active</span>
+            </div>
+            <button class="btn btn-secondary" id="btn-cancel" style="max-width:200px;margin-top:12px;">Cancel</button>
           </div>
-          <h3>Finding opponent...</h3>
-          <p class="match-range">ELO range: <span id="match-range">±50</span></p>
-          <div class="match-stats">
-            <span id="queue-count">0 in queue</span>
-            <span>·</span>
-            <span id="active-matches">0 active</span>
-          </div>
-          <div class="match-progress">
-            <div class="match-progress-bar" id="match-progress-bar"></div>
-          </div>
-          <button id="btn-cancel" class="btn">Cancel</button>
         </div>
-      </section>
 
-      <!-- READY CHECK -->
-      <section id="screen-ready" class="screen">
-        <div class="ready-center">
-          <h3>Match found!</h3>
-          <p class="ready-vs">You <span>vs</span> <strong id="ready-opp-name">Opponent</strong></p>
-          <div class="ready-players">
-            <div class="ready-player" id="ready-you">
-              <div class="ready-dot" id="ready-dot-you"></div>
-              <span>You</span>
+        <!-- READY SCREEN -->
+        <div id="screen-ready" class="screen">
+          <div class="ready-center">
+            <h3>Match Found!</h3>
+            <p class="ready-vs">
+              <strong id="ready-opp-name">Opponent</strong>
+              <span>vs</span>
+              <strong>You</strong>
+            </p>
+            <div class="ready-players">
+              <div class="ready-player">
+                <div class="ready-dot" id="ready-dot-you"></div>
+                You
+              </div>
+              <div class="ready-player">
+                <div class="ready-dot" id="ready-dot-opp"></div>
+                <span id="ready-opp-name2">Opponent</span>
+              </div>
             </div>
-            <div class="ready-player" id="ready-opp">
-              <div class="ready-dot" id="ready-dot-opp"></div>
-              <span id="ready-opp-name2">Opponent</span>
-            </div>
+            <div class="ready-status" id="ready-status">Get into push-up position...</div>
+            <p class="ready-hint">
+              The AI will auto-detect when you're in position, or tap "I am ready" to confirm manually.
+            </p>
+            <button class="btn btn-primary" id="btn-ready-confirm" disabled>Waiting for position...</button>
+            <button class="btn btn-ghost" id="btn-ready-cancel">Leave match</button>
           </div>
-          <div class="ready-status" id="ready-status">Get into push-up position...</div>
-          <div class="ready-hint" id="ready-hint">The AI will detect when you're ready. Hold the plank position with hands on the ground.</div>
-          <button id="btn-ready-confirm" class="btn btn-primary" disabled>Waiting for position...</button>
-          <button id="btn-ready-cancel" class="btn btn-ghost">Leave match</button>
         </div>
-      </section>
 
-      <!-- COMPETE -->
-      <section id="screen-compete" class="screen">
-        <div class="compete-main">
-          <div class="compete-timer-box">
-            <div class="compete-timer" id="compete-timer">60</div>
-            <div class="compete-timer-label">seconds left</div>
-          </div>
-          <div class="compete-vs-bar">
-            <div class="compete-side">
-              <span class="compete-side-name" id="compete-your-name">You</span>
-              <span class="compete-side-reps" id="compete-your-reps">0</span>
+        <!-- COMPETE SCREEN -->
+        <div id="screen-compete" class="screen">
+          <div class="compete-main">
+            <div class="compete-timer-box">
+              <div class="compete-timer" id="compete-timer">60</div>
+              <div class="compete-timer-label">SECONDS REMAINING</div>
             </div>
-            <div class="compete-vs-divider">VS</div>
-            <div class="compete-side">
-              <span class="compete-side-name" id="compete-opp-name">Opponent</span>
-              <span class="compete-side-reps" id="compete-opp-reps">0</span>
-            </div>
-          </div>
-          <div class="compete-progress">
-            <div class="compete-progress-track">
-              <div class="compete-progress-you" id="compete-progress-you" style="width:50%"></div>
-              <div class="compete-progress-opp" id="compete-progress-opp" style="width:50%"></div>
-            </div>
-          </div>
-          <div class="compete-phase-display" id="compete-phase-display">GO!</div>
-          <button id="btn-forfeit" class="btn btn-ghost">Forfeit</button>
-        </div>
-      </section>
 
-      <!-- RESULT -->
-      <section id="screen-result" class="screen">
-        <div class="result-center">
-          <div class="result-hero">
-            <div class="result-icon" id="result-icon">🏆</div>
-            <h2 id="result-title">Victory!</h2>
-            <p id="result-sub">You crushed it</p>
+            <!-- Side-by-Side Video Streams View -->
+            <div class="video-grid">
+              <!-- Local Player Stream -->
+              <div class="video-container">
+                <video id="compete-your-video" autoplay playsinline muted></video>
+                <div class="video-label">You</div>
+              </div>
+
+              <!-- Opponent Player Stream -->
+              <div class="video-container">
+                <video id="compete-opp-video" autoplay playsinline></video>
+                <div id="compete-opp-placeholder">
+                  <span>Waiting for opponent video...</span>
+                </div>
+                <div class="video-label" id="video-opp-name">Opponent</div>
+              </div>
+            </div>
+
+            <div class="compete-vs-bar">
+              <div class="compete-side">
+                <div class="compete-side-name" id="compete-your-name">You</div>
+                <div class="compete-side-reps" id="compete-your-reps">0</div>
+              </div>
+              <div class="compete-vs-divider">VS</div>
+              <div class="compete-side">
+                <div class="compete-side-name" id="compete-opp-name">Opponent</div>
+                <div class="compete-side-reps" id="compete-opp-reps">0</div>
+              </div>
+            </div>
+
+            <div class="compete-progress">
+              <div class="compete-progress-track">
+                <div class="compete-progress-you" id="compete-progress-you" style="width: 50%;"></div>
+                <div class="compete-progress-opp" id="compete-progress-opp" style="width: 50%;"></div>
+              </div>
+            </div>
+
+            <div class="compete-phase-display" id="compete-phase-display">GO!</div>
+
+            <button class="btn btn-secondary" id="btn-forfeit" style="max-width: 200px;">Forfeit Match</button>
           </div>
-          <div class="result-card">
-            <div class="result-row"><span>Your push-ups</span><strong id="res-your">0</strong></div>
-            <div class="result-row"><span>Opponent push-ups</span><strong id="res-opp">0</strong></div>
-            <div class="result-row"><span>Difference</span><strong id="res-diff">0</strong></div>
-            <div class="result-row"><span>ELO change</span><strong id="res-elo-change" class="elo-positive">+0</strong></div>
-          </div>
-          <div class="new-elo-card">
-            <span class="new-elo-label">New ELO rating</span>
-            <span class="new-elo-value" id="res-new-elo">800</span>
-          </div>
-          <button id="btn-again" class="btn btn-primary">Play again</button>
         </div>
-      </section>
+
+        <!-- RESULT SCREEN -->
+        <div id="screen-result" class="screen">
+          <div class="result-center">
+            <div class="result-hero">
+              <div class="result-icon" id="result-icon">🏆</div>
+              <h2 id="result-title">Victory!</h2>
+              <p id="result-sub">You out-repped your opponent</p>
+            </div>
+
+            <div class="result-card">
+              <div class="result-row">
+                <span>Your reps</span>
+                <strong id="res-your">0</strong>
+              </div>
+              <div class="result-row">
+                <span>Opponent reps</span>
+                <strong id="res-opp">0</strong>
+              </div>
+              <div class="result-row">
+                <span>Difference</span>
+                <strong id="res-diff">0</strong>
+              </div>
+            </div>
+
+            <div class="new-elo-card">
+              <span class="new-elo-label">New ELO</span>
+              <span class="new-elo-value" id="res-new-elo">0</span>
+              <span id="res-elo-change" style="font-size:14px;font-weight:600;margin-top:4px;display:block;"></span>
+            </div>
+
+            <button class="btn btn-primary" id="btn-again">Play again</button>
+          </div>
+        </div>
+      </div>
     </main>
-
-    <!-- LOADING OVERLAY -->
-    <div id="loading-overlay" class="loading-overlay">
-      <div class="loading-spinner"></div>
-      <p id="loading-text">Loading...</p>
-    </div>
-
-    <!-- ERROR TOAST -->
-    <div id="error-toast" class="error-toast">
-      <span id="error-text"></span>
-      <button id="error-close">×</button>
-    </div>
   </div>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="pose-detector.js"></script>
-  <script src="app.js"></script>
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loading-overlay">
+    <div class="loading-spinner"></div>
+    <p id="loading-text">Loading...</p>
+  </div>
+
+  <!-- Error Toast -->
+  <div class="error-toast" id="error-toast">
+    <span id="error-text">Something went wrong</span>
+    <button id="error-close">&times;</button>
+  </div>
 </body>
 </html>
