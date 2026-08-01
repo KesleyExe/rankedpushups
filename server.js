@@ -11,17 +11,18 @@ const io = new Server(server, {
   cors: { origin: "*" },
   pingTimeout: 60000,
   pingInterval: 25000,
-  transports: ["websocket", "polling"]
+  transports: ["websocket", "polling"],
 });
 
-// Serve static assets directly from the root directory
+// Serve static assets from the root directory
 app.use(express.static(__dirname));
 
-// ===================== ROUTE HANDLERS =====================
+// Redirect root domain "/" to "/app"
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
+  res.redirect("/app");
 });
 
+// Serve app.html directly from the root directory
 app.get("/app", (req, res) => {
   res.sendFile(path.join(__dirname, "app.html"));
 });
@@ -40,9 +41,16 @@ function expectedScore(a, b) {
 function calculateElo(youElo, oppElo, yourReps, oppReps) {
   const diff = yourReps - oppReps;
   let actual, result;
-  if (diff > 0) { actual = 1; result = "win"; }
-  else if (diff < 0) { actual = 0; result = "loss"; }
-  else { actual = 0.5; result = "tie"; }
+  if (diff > 0) {
+    actual = 1;
+    result = "win";
+  } else if (diff < 0) {
+    actual = 0;
+    result = "loss";
+  } else {
+    actual = 0.5;
+    result = "tie";
+  }
 
   const K_BASE = 16;
   const bonus = Math.min(Math.abs(diff) / 50, 1);
@@ -80,17 +88,19 @@ class Match {
 
   startReadyCheck() {
     this.phase = "ready_check";
-    this.broadcast("match:ready_check", {
+    this.sendTo(this.p1.socketId, "match:ready_check", {
       matchId: this.id,
       opponent: this.getOpponentData(this.p1),
       youAre: "p1",
     });
-    this.broadcast("match:ready_check", {
+    this.sendTo(this.p2.socketId, "match:ready_check", {
       matchId: this.id,
       opponent: this.getOpponentData(this.p2),
       youAre: "p2",
     });
-    console.log(`[Match ${this.id.slice(0,8)}] Ready check: ${this.p1.name} vs ${this.p2.name}`);
+    console.log(
+      `[Match ${this.id.slice(0, 8)}] Ready check: ${this.p1.name} vs ${this.p2.name}`,
+    );
   }
 
   setReady(socketId, isReady) {
@@ -113,7 +123,7 @@ class Match {
     this.phase = "countdown";
     this.timeLeft = this.countdown;
     this.broadcast("match:countdown_start", { seconds: this.countdown });
-    console.log(`[Match ${this.id.slice(0,8)}] Countdown started`);
+    console.log(`[Match ${this.id.slice(0, 8)}] Countdown started`);
 
     this.timer = setInterval(() => {
       this.timeLeft--;
@@ -130,7 +140,7 @@ class Match {
     this.timeLeft = this.duration;
     this.startedAt = Date.now();
     this.broadcast("match:start", { duration: this.duration });
-    console.log(`[Match ${this.id.slice(0,8)}] Active phase started`);
+    console.log(`[Match ${this.id.slice(0, 8)}] Active phase started`);
 
     this.tickInterval = setInterval(() => {
       this.broadcast("match:tick", {
@@ -167,8 +177,18 @@ class Match {
     clearInterval(this.timer);
     clearInterval(this.tickInterval);
 
-    const p1Result = calculateElo(this.p1.elo, this.p2.elo, this.p1Reps, this.p2Reps);
-    const p2Result = calculateElo(this.p2.elo, this.p1.elo, this.p2Reps, this.p1Reps);
+    const p1Result = calculateElo(
+      this.p1.elo,
+      this.p2.elo,
+      this.p1Reps,
+      this.p2Reps,
+    );
+    const p2Result = calculateElo(
+      this.p2.elo,
+      this.p1.elo,
+      this.p2Reps,
+      this.p1Reps,
+    );
 
     this.p1.elo = Math.max(100, this.p1.elo + p1Result.change);
     this.p2.elo = Math.max(100, this.p2.elo + p2Result.change);
@@ -177,8 +197,20 @@ class Match {
 
     const record = {
       id: this.id,
-      p1: { name: this.p1.name, eloBefore: this.p1.elo - p1Result.change, eloAfter: this.p1.elo, reps: this.p1Reps, change: p1Result.change },
-      p2: { name: this.p2.name, eloBefore: this.p2.elo - p2Result.change, eloAfter: this.p2.elo, reps: this.p2Reps, change: p2Result.change },
+      p1: {
+        name: this.p1.name,
+        eloBefore: this.p1.elo - p1Result.change,
+        eloAfter: this.p1.elo,
+        reps: this.p1Reps,
+        change: p1Result.change,
+      },
+      p2: {
+        name: this.p2.name,
+        eloBefore: this.p2.elo - p2Result.change,
+        eloAfter: this.p2.elo,
+        reps: this.p2Reps,
+        change: p2Result.change,
+      },
       result: { p1: p1Result.result, p2: p2Result.result },
       diff: p1Result.diff,
       endedAt: this.endedAt,
@@ -187,19 +219,29 @@ class Match {
     matchHistory.push(record);
 
     this.sendTo(this.p1.socketId, "match:end", {
-      yourReps: this.p1Reps, oppReps: this.p2Reps,
-      yourEloChange: p1Result.change, newElo: this.p1.elo,
-      result: p1Result.result, diff: p1Result.diff,
-      opponentName: this.p2.name, reason,
+      yourReps: this.p1Reps,
+      oppReps: this.p2Reps,
+      yourEloChange: p1Result.change,
+      newElo: this.p1.elo,
+      result: p1Result.result,
+      diff: p1Result.diff,
+      opponentName: this.p2.name,
+      reason,
     });
     this.sendTo(this.p2.socketId, "match:end", {
-      yourReps: this.p2Reps, oppReps: this.p1Reps,
-      yourEloChange: p2Result.change, newElo: this.p2.elo,
-      result: p2Result.result, diff: p2Result.diff,
-      opponentName: this.p1.name, reason,
+      yourReps: this.p2Reps,
+      oppReps: this.p1Reps,
+      yourEloChange: p2Result.change,
+      newElo: this.p2.elo,
+      result: p2Result.result,
+      diff: p2Result.diff,
+      opponentName: this.p1.name,
+      reason,
     });
 
-    console.log(`[Match ${this.id.slice(0,8)}] Ended: ${this.p1.name} ${this.p1Reps} vs ${this.p2.name} ${this.p2Reps} (${reason})`);
+    console.log(
+      `[Match ${this.id.slice(0, 8)}] Ended: ${this.p1.name} ${this.p1Reps} vs ${this.p2.name} ${this.p2Reps} (${reason})`,
+    );
     setTimeout(() => matches.delete(this.id), 30000);
   }
 
@@ -222,8 +264,8 @@ class Match {
 function tryMatchmaking() {
   if (queue.length < 2) return;
   const sorted = queue
-    .map(sid => users.get(sid))
-    .filter(u => u && u.inQueue && !u.inMatch)
+    .map((sid) => users.get(sid))
+    .filter((u) => u && u.inQueue && !u.inMatch)
     .sort((a, b) => a.elo - b.elo);
 
   const matched = new Set();
@@ -249,7 +291,9 @@ function tryMatchmaking() {
         const match = new Match(sorted[i], sorted[j]);
         matches.set(match.id, match);
         match.startReadyCheck();
-        console.log(`[Matchmaking] Matched: ${sorted[i].name}(${sorted[i].elo}) vs ${sorted[j].name}(${sorted[j].elo})`);
+        console.log(
+          `[Matchmaking] Matched: ${sorted[i].name}(${sorted[i].elo}) vs ${sorted[j].name}(${sorted[j].elo})`,
+        );
         break;
       }
     }
@@ -267,7 +311,10 @@ io.on("connection", (socket) => {
     const user = {
       id: uuidv4(),
       name: name?.trim()?.slice(0, 16) || "Anonymous",
-      elo: (!isNaN(storedElo) && storedElo >= 100 && storedElo <= 2000) ? storedElo : 800,
+      elo:
+        !isNaN(storedElo) && storedElo >= 100 && storedElo <= 2000
+          ? storedElo
+          : 800,
       socketId: socket.id,
       inQueue: false,
       inMatch: false,
@@ -275,24 +322,18 @@ io.on("connection", (socket) => {
     };
     users.set(socket.id, user);
     socket.emit("user:registered", { name: user.name, elo: user.elo });
-    console.log(`[User] Registered: ${user.name} (${socket.id}) ELO: ${user.elo}`);
+    console.log(
+      `[User] Registered: ${user.name} (${socket.id}) ELO: ${user.elo}`,
+    );
   });
 
   socket.on("queue:join", () => {
     const user = users.get(socket.id);
-    if (!user) {
-      console.log(`[Queue] Reject: user not registered (${socket.id})`);
-      return;
-    }
-    if (user.inQueue || user.inMatch) {
-      console.log(`[Queue] Reject: already in queue or match (${user.name})`);
-      return;
-    }
+    if (!user || user.inQueue || user.inMatch) return;
     user.inQueue = true;
     user.queueJoinedAt = Date.now();
     queue.push(socket.id);
     socket.emit("queue:joined");
-    console.log(`[Queue] Joined: ${user.name} (${socket.id}). Queue size: ${queue.length}`);
   });
 
   socket.on("queue:leave", () => {
@@ -303,7 +344,6 @@ io.on("connection", (socket) => {
     const idx = queue.indexOf(socket.id);
     if (idx > -1) queue.splice(idx, 1);
     socket.emit("queue:left");
-    console.log(`[Queue] Left: ${user.name}. Queue size: ${queue.length}`);
   });
 
   socket.on("match:ready", ({ matchId, ready }) => {
@@ -321,13 +361,40 @@ io.on("connection", (socket) => {
     if (match) match.forfeit(socket.id);
   });
 
+  // --- WebRTC Signaling (legacy naming support + new unified handler) ---
+  socket.on("signal:offer", ({ target, offer }) => {
+    io.to(target).emit("signal:offer", { sender: socket.id, offer });
+  });
+
+  socket.on("signal:answer", ({ target, answer }) => {
+    io.to(target).emit("signal:answer", { sender: socket.id, answer });
+  });
+
+  socket.on("signal:ice-candidate", ({ target, candidate }) => {
+    io.to(target).emit("signal:ice-candidate", {
+      sender: socket.id,
+      candidate,
+    });
+  });
+
+  socket.on("webrtc:signal", ({ matchId, signal }) => {
+    const match = matches.get(matchId);
+    if (!match) return;
+
+    const recipientSocketId =
+      socket.id === match.p1.socketId ? match.p2.socketId : match.p1.socketId;
+    io.to(recipientSocketId).emit("webrtc:signal", { signal });
+  });
+
   socket.on("disconnect", () => {
     const user = users.get(socket.id);
     if (user) {
-      console.log(`[Socket] Disconnected: ${user.name} (${socket.id})`);
       for (const [_, match] of matches) {
         if (match.phase !== "ended") {
-          if (match.p1.socketId === socket.id || match.p2.socketId === socket.id) {
+          if (
+            match.p1.socketId === socket.id ||
+            match.p2.socketId === socket.id
+          ) {
             match.forfeit(socket.id);
           }
         }
@@ -337,19 +404,27 @@ io.on("connection", (socket) => {
         if (idx > -1) queue.splice(idx, 1);
       }
       users.delete(socket.id);
-    } else {
-      console.log(`[Socket] Disconnected: ${socket.id} (unregistered)`);
     }
   });
 });
 
 // ===================== HTTP ENDPOINTS =====================
 app.get("/api/leaderboard", (req, res) => {
-  const allUsers = Array.from(users.values()).map(u => ({ name: u.name, elo: u.elo, online: true }));
-  const seen = new Set(allUsers.map(u => u.name));
+  const allUsers = Array.from(users.values()).map((u) => ({
+    name: u.name,
+    elo: u.elo,
+    online: true,
+  }));
+  const seen = new Set(allUsers.map((u) => u.name));
   for (const m of matchHistory.slice(-50)) {
-    if (!seen.has(m.p1.name)) { allUsers.push({ name: m.p1.name, elo: m.p1.eloAfter, online: false }); seen.add(m.p1.name); }
-    if (!seen.has(m.p2.name)) { allUsers.push({ name: m.p2.name, elo: m.p2.eloAfter, online: false }); seen.add(m.p2.name); }
+    if (!seen.has(m.p1.name)) {
+      allUsers.push({ name: m.p1.name, elo: m.p1.eloAfter, online: false });
+      seen.add(m.p1.name);
+    }
+    if (!seen.has(m.p2.name)) {
+      allUsers.push({ name: m.p2.name, elo: m.p2.eloAfter, online: false });
+      seen.add(m.p2.name);
+    }
   }
   allUsers.sort((a, b) => b.elo - a.elo);
   res.json(allUsers.slice(0, 20));
@@ -363,27 +438,28 @@ app.get("/api/stats", (req, res) => {
   res.json({
     online: users.size,
     inQueue: queue.length,
-    activeMatches: Array.from(matches.values()).filter(m => m.phase === "active").length,
+    activeMatches: Array.from(matches.values()).filter(
+      (m) => m.phase === "active",
+    ).length,
     totalMatches: matchHistory.length,
   });
 });
 
-// ===================== START SERVER =====================
 const PORT = process.env.PORT || 3000;
 
 function getLocalIp() {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
+      if (iface.family === "IPv4" && !iface.internal) {
         return iface.address;
       }
     }
   }
-  return 'YOUR_IP';
+  return "YOUR_IP";
 }
 
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, "0.0.0.0", () => {
   const localIp = getLocalIp();
   console.log(`[Server] Push-up Arena running on port ${PORT}`);
   console.log(`[Server] Local:    http://localhost:${PORT}`);
