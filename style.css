@@ -211,7 +211,8 @@ html, body {
 
 .content-body {
   padding: 16px 20px;
-  max-width: 560px;
+  max-width: 680px;
+  margin: 0 auto;
 }
 
 /* ========== SCREENS ========== */
@@ -633,7 +634,7 @@ html, body {
   50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
 }
 
-/* ========== COMPETE ========== */
+/* ========== COMPETE & VIDEO GRID ========== */
 .compete-main {
   display: flex;
   flex-direction: column;
@@ -641,9 +642,9 @@ html, body {
   justify-content: center;
   min-height: 60vh;
   text-align: center;
-  gap: 20px;
-  padding: 24px;
-  max-width: 480px;
+  gap: 16px;
+  padding: 16px;
+  max-width: 640px;
   margin: 0 auto;
 }
 
@@ -652,7 +653,7 @@ html, body {
 }
 
 .compete-timer {
-  font-size: 64px;
+  font-size: 56px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -660,10 +661,70 @@ html, body {
 }
 
 .compete-timer-label {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  margin-top: 4px;
+}
+
+/* WebRTC Side-by-Side Video Grid */
+.video-grid {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  margin: 8px 0;
+}
+
+.video-container {
+  flex: 1;
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  min-width: 0;
+}
+
+.video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+#compete-your-video {
+  transform: scaleX(-1);
+}
+
+.video-label {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(10, 10, 12, 0.7);
+  color: var(--text-primary);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  backdrop-filter: blur(4px);
+  z-index: 2;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+#compete-opp-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  background: var(--surface);
+  text-align: center;
+  padding: 12px;
+  z-index: 1;
 }
 
 .compete-vs-bar {
@@ -678,25 +739,25 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   flex: 1;
 }
 
 .compete-side-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .compete-side-reps {
-  font-size: 36px;
+  font-size: 32px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
 }
 
 .compete-vs-divider {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-quaternary);
   letter-spacing: 0.1em;
@@ -704,7 +765,7 @@ html, body {
 
 .compete-progress {
   width: 100%;
-  max-width: 360px;
+  max-width: 480px;
 }
 
 .compete-progress-track {
@@ -728,9 +789,9 @@ html, body {
 }
 
 .compete-phase-display {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
-  padding: 6px 18px;
+  padding: 4px 16px;
   border-radius: var(--radius-full);
   background: var(--surface);
   color: var(--text-tertiary);
@@ -970,10 +1031,40 @@ html, body {
   .content-body {
     padding: 12px;
   }
+
+  .video-grid {
+    gap: 8px;
+  }
+  .video-label {
+    font-size: 10px;
+    padding: 1px 5px;
+  }
+
   .compete-timer {
-    font-size: 48px;
+    font-size: 40px;
   }
   .compete-side-reps {
-    font-size: 28px;
+    font-size: 24px;
+  }
+  .compete-main {
+    padding: 12px;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .compete-timer {
+    font-size: 32px;
+  }
+  .compete-side-reps {
+    font-size: 20px;
+  }
+  .video-grid {
+    gap: 6px;
+  }
+  .video-label {
+    font-size: 9px;
+    bottom: 4px;
+    left: 4px;
   }
 }
