@@ -1,6 +1,6 @@
 /**
  * PoseDetector - TensorFlow.js MoveNet for Push-Up Detection
- * v3.0 Production Ready: Strict Body Validation & Scale-Aware Pose Tracking
+ * v3.1 Fixed: More reliable ready detection & better tracking
  */
 
 class PoseDetector {
@@ -26,14 +26,15 @@ class PoseDetector {
     // Ready detection
     this.isReady = false;
     this.readyFrames = 0;
-    this.readyThreshold = 20; // ~0.5s at 30-60 FPS
+    this.readyThreshold = 12; // ~0.4s at 30 FPS (lowered for faster response)
+    this.readyLostThreshold = 8; // Frames before we say not ready
 
     // Smoothing (Exponential Moving Average)
     this.smoothedKeypoints = null;
-    this.alpha = 0.5; // Smoothing factor (lower = smoother, higher = more responsive)
+    this.alpha = 0.5;
 
     // Confidence thresholds
-    this.minConfidence = 0.35; // Stricter threshold to eliminate false positive hand detections
+    this.minConfidence = 0.30; // Slightly lowered for better detection in various lighting
     this.pushupDownAngle = 100;
     this.pushupUpAngle = 155;
 
@@ -119,7 +120,7 @@ class PoseDetector {
     const model = poseDetection.SupportedModels.MoveNet;
     const detectorConfig = {
       modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-      minPoseScore: 0.25,
+      minPoseScore: 0.20, // Lowered to catch more poses
     };
 
     this.detector = await poseDetection.createDetector(model, detectorConfig);
@@ -231,7 +232,8 @@ class PoseDetector {
   }
 
   /**
-   * Ensures essential torso and arm keypoints are present before running logic
+   * Ensures essential torso keypoints are present before running logic
+   * Relaxed: only need one shoulder and one hip visible
    */
   hasRequiredBodyParts(keypoints) {
     const ls = this.getKP(keypoints, "left_shoulder");
@@ -239,7 +241,7 @@ class PoseDetector {
     const lh = this.getKP(keypoints, "left_hip");
     const rh = this.getKP(keypoints, "right_hip");
 
-    // Must have visible shoulders AND hips
+    // Must have at least one shoulder AND at least one hip
     const hasTorso = (ls || rs) && (lh || rh);
     return Boolean(hasTorso);
   }
@@ -270,7 +272,7 @@ class PoseDetector {
     const rh = this.getKP(keypoints, "right_hip");
 
     // Estimate body scale using torso length (shoulder to hip)
-    let torsoLength = 100; // Default fallback distance in pixels
+    let torsoLength = 100;
     if ((ls || rs) && (lh || rh)) {
       const sY = ls && rs ? (ls.y + rs.y) / 2 : (ls || rs).y;
       const hY = lh && rh ? (lh.y + rh.y) / 2 : (lh || rh).y;
@@ -297,8 +299,8 @@ class PoseDetector {
         const maxH = Math.max(...this.heightHistory);
         const range = maxH - minH;
 
-        // Require vertical movement to be at least 35% of torso length
-        if (range > torsoLength * 0.35) {
+        // Require vertical movement to be at least 30% of torso length (lowered from 35%)
+        if (range > torsoLength * 0.30) {
           const ratio = (currentHeight - minH) / (range + 1e-6);
           if (ratio > 0.65) heightPhase = "down";
           else if (ratio < 0.35) heightPhase = "up";
@@ -356,10 +358,13 @@ class PoseDetector {
   }
 
   detectReady(keypoints) {
+    // Count visible keypoints with relaxed threshold
     const visible = keypoints.filter((k) => k.score > this.minConfidence);
-    if (visible.length < 6) {
-      this.readyFrames = Math.max(0, this.readyFrames - 2);
-      if (this.readyFrames < 5) this.isReady = false;
+
+    // Relaxed: need at least 5 visible keypoints (was 6)
+    if (visible.length < 5) {
+      this.readyFrames = Math.max(0, this.readyFrames - 1);
+      if (this.readyFrames < this.readyLostThreshold) this.isReady = false;
       return;
     }
 
@@ -369,8 +374,8 @@ class PoseDetector {
     const rh = this.getKP(keypoints, "right_hip");
 
     if ((!ls && !rs) || (!lh && !rh)) {
-      this.readyFrames = Math.max(0, this.readyFrames - 2);
-      if (this.readyFrames < 5) this.isReady = false;
+      this.readyFrames = Math.max(0, this.readyFrames - 1);
+      if (this.readyFrames < this.readyLostThreshold) this.isReady = false;
       return;
     }
 
@@ -378,15 +383,16 @@ class PoseDetector {
     const shoulderY = ls && rs ? (ls.y + rs.y) / 2 : (ls || rs).y;
     const hipY = lh && rh ? (lh.y + rh.y) / 2 : (lh || rh).y;
 
-    // The shoulders and hips should be in a relatively horizontal alignment frame
-    const bodyHorizontal = Math.abs(shoulderY - hipY) < h * 0.25;
+    // The shoulders and hips should be in a relatively horizontal alignment
+    // Relaxed tolerance: 30% of canvas height (was 25%)
+    const bodyHorizontal = Math.abs(shoulderY - hipY) < h * 0.30;
 
     if (bodyHorizontal) {
       this.readyFrames++;
       if (this.readyFrames >= this.readyThreshold) this.isReady = true;
     } else {
-      this.readyFrames = Math.max(0, this.readyFrames - 2);
-      if (this.readyFrames < Math.floor(this.readyThreshold * 0.3)) {
+      this.readyFrames = Math.max(0, this.readyFrames - 1);
+      if (this.readyFrames < this.readyLostThreshold) {
         this.isReady = false;
       }
     }
