@@ -1,7 +1,7 @@
 /**
  * PoseDetector - TensorFlow.js MoveNet for Push-Up Detection
- * v4.0: Bulletproof Edition. Features Center-of-Mass opponent filtering, 
- *       Anchor Peak calibration to prevent resting ghost-reps, and strict drop minimums.
+ * v5.0: Fixed the "Hand Hallucination" bug. Features high-confidence 
+ *       filtering, strict anatomy checks, and proportion sanity checks.
  */
 
 class PoseDetector {
@@ -41,14 +41,14 @@ class PoseDetector {
     this.smoothedKeypoints = null;
     this.alpha = 0.35;  
 
-    // Confidence thresholds
-    this.minConfidence = 0.18;    
-    this.drawConfidence = 0.10; 
-    this.minPoseScore = 0.15;   
+    // Confidence thresholds (CRITICAL FIX)
+    this.minConfidence = 0.45;  // Raised from 0.18 to ignore hands/hallucinations
+    this.drawConfidence = 0.20; // Draw threshold
+    this.minPoseScore = 0.30;   // Raised from 0.15 for better overall frame rejection
     
     // Pushup thresholds
-    this.downDropRatio = 0.38;  // Must drop 38% of torso to register "down"
-    this.upDropRatio = 0.12;    // Must be within 12% of torso from top to register "up"
+    this.downDropRatio = 0.38;  
+    this.upDropRatio = 0.12;    
     
     // Angle thresholds (degrees)
     this.pushupDownAngle = 95;
@@ -60,7 +60,7 @@ class PoseDetector {
     // Debouncing (Anti-jitter)
     this.pendingPhase = "unknown";
     this.pendingFrames = 0;
-    this.requiredHoldFrames = 5; // Must hold a pose for 5 consecutive frames to register
+    this.requiredHoldFrames = 5; 
 
     this.status = "idle";
     this.errorMessage = "";
@@ -176,17 +176,16 @@ class PoseDetector {
                                'left_elbow','right_elbow','left_wrist','right_wrist'];
             const visibleBody = rawKP.filter(k => bodyNames.includes(k.name) && k.score > this.minConfidence);
 
-            // ANTI-SWAP LOGIC: Prevent snapping to opponents in the background
-            if (visibleBody.length >= 3) {
+            // Require at least 4 highly confident upper-body points to even attempt tracking
+            if (visibleBody.length >= 4) {
               const cx = visibleBody.reduce((sum, k) => sum + k.x, 0) / visibleBody.length;
               const cy = visibleBody.reduce((sum, k) => sum + k.y, 0) / visibleBody.length;
               
               if (this.lastCenter) {
                 const dist = Math.hypot(cx - this.lastCenter.x, cy - this.lastCenter.y);
-                // If the body teleports more than 25% of the screen in 1 frame, it's a different person
                 if (dist > this.canvas.width * 0.25) {
                   this.swapLockoutFrames++;
-                  if (this.swapLockoutFrames < 15) { // Wait 0.5s before accepting new person
+                  if (this.swapLockoutFrames < 15) { 
                     this.animationId = requestAnimationFrame(detect);
                     return; 
                   }
@@ -200,7 +199,6 @@ class PoseDetector {
               this.lostFrames = 0;
               kp = this.smoothKeypoints(rawKP);
             } else if (this.lostFrames < this.maxLostFrames && this.lastGoodKeypoints) {
-              // Graceful degradation
               this.lostFrames++;
               hasPose = true;
               const decay = Math.max(0, 1 - (this.lostFrames / this.maxLostFrames));
@@ -285,48 +283,40 @@ class PoseDetector {
     const rw = this.getKP(keypoints, "right_wrist");
 
     // Estimate torso length for scale
-    let torsoLength = 100;
-    const hasShoulder = ls || rs;
-    const hasHip = lh || rh;
-    if (hasShoulder && hasHip) {
-      const sY = ls && rs ? (ls.y + rs.y) / 2 : (ls || rs).y;
+    let torsoLength = 120; // Increased base length
+    if (ls && rs && (lh || rh)) {
+      const sY = (ls.y + rs.y) / 2;
       const hY = lh && rh ? (lh.y + rh.y) / 2 : (lh || rh).y;
-      torsoLength = Math.max(Math.abs(hY - sY), 100); 
+      torsoLength = Math.max(Math.abs(hY - sY), 120); 
     }
 
-    // ===== Current shoulder height =====
     let currentHeight = null;
     if (ls && rs) currentHeight = (ls.y + rs.y) / 2;
     else if (ls || rs) currentHeight = (ls || rs).y;
 
-    // ===== Anchor Peak Calibration =====
     if (currentHeight !== null) {
       if (this.establishedUpY === null) {
         this.establishedUpY = currentHeight;
       } else {
-        // If user pushes higher than before, instantly adopt the new height
         if (currentHeight < this.establishedUpY) {
           this.establishedUpY = currentHeight;
         } 
-        // Slowly track downward drift to handle natural posture fatigue over time
         else if (this.phase === "up" || this.phase === "unknown") {
           this.establishedUpY = this.establishedUpY * 0.98 + currentHeight * 0.02;
         }
       }
     }
 
-    // ===== Height-based phase detection =====
     let heightPhase = null;
     let heightDepth = 0.0;
 
     if (currentHeight !== null && this.establishedUpY !== null) {
       const drop = currentHeight - this.establishedUpY;
-      const range = torsoLength * 0.45; // Assumed max physical drop capability
+      const range = torsoLength * 0.45; 
       
       heightDepth = Math.max(0, Math.min(1, drop / range));
 
-      // Strict minimum drop of 45 pixels - impossible to trigger by laying on floor
-      const downThreshold = Math.max(torsoLength * this.downDropRatio, 45); 
+      const downThreshold = Math.max(torsoLength * this.downDropRatio, 50); 
       const upThreshold = torsoLength * this.upDropRatio;
 
       if (drop > downThreshold) {
@@ -336,7 +326,6 @@ class PoseDetector {
       }
     }
 
-    // ===== Angle-based detection (fallback / confirmation) =====
     let anglePhase = null;
     let angleDepth = 0.0;
 
@@ -357,7 +346,6 @@ class PoseDetector {
       else if (rightAngle > this.pushupUpAngle) anglePhase = "up";
     }
 
-    // ===== Fuse methods =====
     let rawNewPhase = this.phase;
     let newDepth = 0.0;
 
@@ -369,7 +357,6 @@ class PoseDetector {
       newDepth = angleDepth;
     }
 
-    // ===== Debouncing (Hold to Confirm Phase) =====
     if (rawNewPhase !== this.phase && rawNewPhase !== "unknown") {
       if (rawNewPhase === this.pendingPhase) {
         this.pendingFrames++;
@@ -395,28 +382,31 @@ class PoseDetector {
   }
 
   detectReady(keypoints) {
-    const visible = keypoints.filter((k) => k.score > this.minConfidence);
-    if (visible.length < 3) {
-      this.readyFrames = Math.max(0, this.readyFrames - 1);
-      if (this.readyFrames < this.readyLostThreshold) this.isReady = false;
-      return;
-    }
-
     const ls = this.getKP(keypoints, "left_shoulder");
     const rs = this.getKP(keypoints, "right_shoulder");
     const lh = this.getKP(keypoints, "left_hip");
     const rh = this.getKP(keypoints, "right_hip");
 
-    if ((!ls && !rs) || (!lh && !rh)) {
+    // CRITICAL FIX: MUST have both shoulders and at least one hip.
+    if (!ls || !rs || (!lh && !rh)) {
+      this.readyFrames = Math.max(0, this.readyFrames - 1);
+      if (this.readyFrames < this.readyLostThreshold) this.isReady = false;
+      return;
+    }
+
+    // SANITY CHECK: Are the shoulders a human distance apart, or just fingers?
+    const shoulderDist = Math.abs(ls.x - rs.x);
+    const shoulderY = (ls.y + rs.y) / 2;
+    const hipY = lh && rh ? (lh.y + rh.y) / 2 : (lh || rh).y;
+    const torsoLen = Math.abs(hipY - shoulderY);
+
+    if (shoulderDist < 45 || torsoLen < 70) {
       this.readyFrames = Math.max(0, this.readyFrames - 1);
       if (this.readyFrames < this.readyLostThreshold) this.isReady = false;
       return;
     }
 
     const h = this.canvas.height;
-    const shoulderY = ls && rs ? (ls.y + rs.y) / 2 : (ls || rs).y;
-    const hipY = lh && rh ? (lh.y + rh.y) / 2 : (lh || rh).y;
-
     const bodyHorizontal = Math.abs(shoulderY - hipY) < h * 0.40;
 
     if (bodyHorizontal) {
