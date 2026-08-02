@@ -1,7 +1,4 @@
-/**
- * PoseDetector - TensorFlow.js MoveNet for Push-Up Detection
- * v3.2: Graceful tracking loss, visual depth gauge, consistent phase detection
- */
+//PoseDetector - TensorFlow.js MoveNet for Push-Up Detection
 
 class PoseDetector {
   constructor() {
@@ -15,43 +12,46 @@ class PoseDetector {
 
     // Push-up tracking state
     this.repCount = 0;
-    this.phase = "up"; // "up", "down", or "unknown"
-    this.lastPhase = "up";
-    this.phaseHistory = [];
-    this.phaseLockFrames = 0; // Frames since last phase change
-    this.minPhaseLock = 3; // Minimum frames before phase can change
-
+    this.phase = "up";         // "up", "down", or "unknown"
+    this.lastPhase = "up";     // Last confirmed phase (for rep counting)
+    
     // Height tracking
     this.heightHistory = [];
-    this.heightWindow = 12;
-    this.baselineHeight = null; // Calibrated "up" position height
-
+    this.heightWindow = 25;
+    this.upPositionY = null;   // Calibrated UP position (smallest y = highest on screen)
+    this.downPositionY = null; // Calibrated DOWN position (largest y = lowest on screen)
+    
     // Ready detection
     this.isReady = false;
     this.readyFrames = 0;
-    this.readyThreshold = 10;
-    this.readyLostThreshold = 6;
+    this.readyThreshold = 6;      // ~0.2s at 30fps
+    this.readyLostThreshold = 4;  // Brief dropouts allowed
 
     // Tracking resilience
     this.lostFrames = 0;
-    this.maxLostFrames = 10;
+    this.maxLostFrames = 12;
     this.lastGoodKeypoints = null;
-    this.trackingQuality = 1.0; // 0.0 - 1.0
 
-    // Smoothing (Exponential Moving Average)
+    // Smoothing
     this.smoothedKeypoints = null;
-    this.alpha = 0.45;
+    this.alpha = 0.35;  // Slightly more smoothing for stability
 
     // Confidence thresholds
-    this.minConfidence = 0.25; // Lowered for better low-position tracking
-    this.minPoseScore = 0.18;
-    this.pushupDownAngle = 95;  // Tighter down threshold
-    this.pushupUpAngle = 150;   // Tighter up threshold
+    this.minConfidence = 0.18;    // For logic (pushup counting, ready check)
+    this.drawConfidence = 0.10; // For visual skeleton (draw even faint detections)
+    this.minPoseScore = 0.15;   // Detector-level threshold
+    
+    // Pushup thresholds (as fraction of torso length)
+    this.downDropRatio = 0.38;  // Must drop 38% of torso to register "down"
+    this.upDropRatio = 0.12;    // Must be within 12% of torso from top to register "up"
+    
+    // Angle thresholds (degrees)
+    this.pushupDownAngle = 95;
+    this.pushupUpAngle = 150;
 
-    // Depth gauge for visual feedback (0.0 = up, 1.0 = down)
+    // Depth gauge (0.0 = up, 1.0 = down)
     this.depthRatio = 0.0;
 
-    // Status tracking
     this.status = "idle";
     this.errorMessage = "";
   }
@@ -77,22 +77,10 @@ class PoseDetector {
 
   async loadTFJS() {
     const scripts = [
-      {
-        src: "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.10.0/dist/tf-core.min.js",
-        name: "tf-core",
-      },
-      {
-        src: "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.10.0/dist/tf-converter.min.js",
-        name: "tf-converter",
-      },
-      {
-        src: "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.10.0/dist/tf-backend-webgl.min.js",
-        name: "tf-webgl",
-      },
-      {
-        src: "https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.0/dist/pose-detection.min.js",
-        name: "pose-detection",
-      },
+      { src: "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.10.0/dist/tf-core.min.js", name: "tf-core" },
+      { src: "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.10.0/dist/tf-converter.min.js", name: "tf-converter" },
+      { src: "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.10.0/dist/tf-backend-webgl.min.js", name: "tf-webgl" },
+      { src: "https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.0/dist/pose-detection.min.js", name: "pose-detection" },
     ];
 
     for (const script of scripts) {
@@ -112,10 +100,7 @@ class PoseDetector {
 
   loadScript(src, name) {
     return new Promise((resolve, reject) => {
-      if (document.querySelector(`script[src="${src}"]`)) {
-        resolve();
-        return;
-      }
+      if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
       const script = document.createElement("script");
       script.src = src;
       script.async = false;
@@ -126,44 +111,30 @@ class PoseDetector {
   }
 
   async createDetector() {
-    if (!window.poseDetection) {
-      throw new Error("Pose detection library not available");
-    }
-
+    if (!window.poseDetection) throw new Error("Pose detection library not available");
     const model = poseDetection.SupportedModels.MoveNet;
     const detectorConfig = {
       modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
       minPoseScore: this.minPoseScore,
     };
-
     this.detector = await poseDetection.createDetector(model, detectorConfig);
   }
 
   async startCamera() {
     if (this.stream) this.stopCamera();
-
     const constraints = {
-      video: {
-        facingMode: "user",
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-      },
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
       audio: false,
     };
-
     this.stream = await navigator.mediaDevices.getUserMedia(constraints);
     this.video.srcObject = this.stream;
-
     return new Promise((resolve, reject) => {
       this.video.onloadedmetadata = () => {
-        this.video
-          .play()
-          .then(() => {
-            this.canvas.width = this.video.videoWidth || 640;
-            this.canvas.height = this.video.videoHeight || 480;
-            resolve();
-          })
-          .catch(reject);
+        this.video.play().then(() => {
+          this.canvas.width = this.video.videoWidth || 640;
+          this.canvas.height = this.video.videoHeight || 480;
+          resolve();
+        }).catch(reject);
       };
       this.video.onerror = reject;
     });
@@ -171,26 +142,18 @@ class PoseDetector {
 
   stopCamera() {
     this.isRunning = false;
-    if (this.animationId) {
-      cancelAnimationFrame(this.animationId);
-      this.animationId = null;
-    }
-    if (this.stream) {
-      this.stream.getTracks().forEach((t) => t.stop());
-      this.stream = null;
-    }
+    if (this.animationId) { cancelAnimationFrame(this.animationId); this.animationId = null; }
+    if (this.stream) { this.stream.getTracks().forEach((t) => t.stop()); this.stream = null; }
     if (this.video) this.video.srcObject = null;
   }
 
   async startDetection(onFrame) {
     if (!this.detector) throw new Error("Detector not initialized");
-
     this.isRunning = true;
     this.resetReps();
 
     const detect = async () => {
       if (!this.isRunning) return;
-
       if (this.video.readyState >= 2) {
         try {
           const poses = await this.detector.estimatePoses(this.video);
@@ -199,27 +162,24 @@ class PoseDetector {
 
           if (poses.length > 0) {
             const rawKP = poses[0].keypoints;
-            // Be lenient: if we have any body keypoints, try to use them
-            const bodyParts = rawKP.filter(k => 
-              ['nose', 'left_shoulder', 'right_shoulder', 'left_hip', 'right_hip', 
-               'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist'].includes(k.name)
-            );
-            const visibleBody = bodyParts.filter(k => k.score > this.minConfidence);
+            // Need at least 3 body keypoints to attempt tracking
+            const bodyNames = ['nose','left_shoulder','right_shoulder','left_hip','right_hip',
+                               'left_elbow','right_elbow','left_wrist','right_wrist'];
+            const visibleBody = rawKP.filter(k => bodyNames.includes(k.name) && k.score > this.minConfidence);
 
-            if (visibleBody.length >= 4) {
+            if (visibleBody.length >= 3) {
               hasPose = true;
               this.lastGoodKeypoints = rawKP.map(k => ({...k}));
               this.lostFrames = 0;
               kp = this.smoothKeypoints(rawKP);
             } else if (this.lostFrames < this.maxLostFrames && this.lastGoodKeypoints) {
-              // Graceful degradation: use last known keypoints with decay
+              // Graceful degradation: blend last good pose with current
               this.lostFrames++;
               hasPose = true;
-              // Blend last good with current (even if current is poor)
+              const decay = Math.max(0, 1 - (this.lostFrames / this.maxLostFrames));
               const blended = rawKP.map((k, i) => {
                 const last = this.lastGoodKeypoints[i];
                 if (!last) return k;
-                const decay = 1 - (this.lostFrames / this.maxLostFrames);
                 return {
                   ...k,
                   x: k.x * (1 - decay) + last.x * decay,
@@ -232,14 +192,14 @@ class PoseDetector {
           }
 
           if (hasPose && kp) {
-            this.trackingQuality = Math.max(0, 1 - (this.lostFrames / this.maxLostFrames));
+            const quality = Math.max(0, 1 - (this.lostFrames / this.maxLostFrames));
             this.detectReady(kp);
 
             if (this.isReady) {
               this.detectPushup(kp);
             } else {
               this.phase = "unknown";
-              this.depthRatio = 0.5;
+              this.depthRatio = 0.0;
             }
 
             this.drawFrame(kp);
@@ -251,49 +211,27 @@ class PoseDetector {
                 ready: this.isReady,
                 keypoints: kp,
                 depth: this.depthRatio,
-                quality: this.trackingQuality,
+                quality: quality,
               });
             }
           } else {
             this.lostFrames++;
-            this.trackingQuality = 0;
             this.isReady = false;
             this.readyFrames = 0;
-            this.heightHistory = [];
             this.phase = "unknown";
-            this.depthRatio = 0.5;
+            this.depthRatio = 0.0;
             this.drawFrame(null);
-
             if (onFrame) {
-              onFrame({
-                reps: this.repCount,
-                phase: "unknown",
-                ready: false,
-                keypoints: null,
-                depth: 0.5,
-                quality: 0,
-              });
+              onFrame({ reps: this.repCount, phase: "unknown", ready: false, keypoints: null, depth: 0, quality: 0 });
             }
           }
         } catch (e) {
           console.error("Detection frame error:", e);
         }
       }
-
       this.animationId = requestAnimationFrame(detect);
     };
-
     detect();
-  }
-
-  /**
-   * Relaxed body detection - needs only 4 visible body keypoints
-   */
-  hasRequiredBodyParts(keypoints) {
-    const bodyNames = ['left_shoulder', 'right_shoulder', 'left_hip', 'right_hip',
-                       'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist'];
-    const visible = keypoints.filter(k => bodyNames.includes(k.name) && k.score > this.minConfidence);
-    return visible.length >= 4;
   }
 
   smoothKeypoints(keypoints) {
@@ -302,12 +240,8 @@ class PoseDetector {
       return this.smoothedKeypoints;
     }
     for (let i = 0; i < keypoints.length; i++) {
-      this.smoothedKeypoints[i].x =
-        this.alpha * this.smoothedKeypoints[i].x +
-        (1 - this.alpha) * keypoints[i].x;
-      this.smoothedKeypoints[i].y =
-        this.alpha * this.smoothedKeypoints[i].y +
-        (1 - this.alpha) * keypoints[i].y;
+      this.smoothedKeypoints[i].x = this.alpha * this.smoothedKeypoints[i].x + (1 - this.alpha) * keypoints[i].x;
+      this.smoothedKeypoints[i].y = this.alpha * this.smoothedKeypoints[i].y + (1 - this.alpha) * keypoints[i].y;
       this.smoothedKeypoints[i].score = keypoints[i].score;
     }
     return this.smoothedKeypoints;
@@ -323,121 +257,113 @@ class PoseDetector {
     const lw = this.getKP(keypoints, "left_wrist");
     const rw = this.getKP(keypoints, "right_wrist");
 
-    // ===== Body scale estimation =====
+    // Estimate torso length for scale
     let torsoLength = 100;
-    if ((ls || rs) && (lh || rh)) {
+    const hasShoulder = ls || rs;
+    const hasHip = lh || rh;
+    if (hasShoulder && hasHip) {
       const sY = ls && rs ? (ls.y + rs.y) / 2 : (ls || rs).y;
       const hY = lh && rh ? (lh.y + rh.y) / 2 : (lh || rh).y;
-      torsoLength = Math.max(Math.abs(hY - sY), 40);
+      torsoLength = Math.max(Math.abs(hY - sY), 50);
     }
 
-    // ===== Height-based depth detection =====
+    // ===== Current shoulder height =====
     let currentHeight = null;
-    if (ls && rs) {
-      currentHeight = (ls.y + rs.y) / 2;
-    } else if (ls || rs) {
-      currentHeight = (ls || rs).y;
-    }
+    if (ls && rs) currentHeight = (ls.y + rs.y) / 2;
+    else if (ls || rs) currentHeight = (ls || rs).y;
 
-    let heightPhase = null;
-    let heightDepth = 0.5;
-
+    // ===== Calibrate up/down positions from history =====
     if (currentHeight !== null) {
       this.heightHistory.push(currentHeight);
-      if (this.heightHistory.length > this.heightWindow) {
-        this.heightHistory.shift();
-      }
+      if (this.heightHistory.length > this.heightWindow) this.heightHistory.shift();
 
       if (this.heightHistory.length >= 5) {
-        const minH = Math.min(...this.heightHistory);
-        const maxH = Math.max(...this.heightHistory);
-        const range = maxH - minH;
-
-        // Calibrate baseline on the fly
-        if (range > torsoLength * 0.25) {
-          this.baselineHeight = maxH;
-          heightDepth = (currentHeight - minH) / (range + 1e-6);
-          if (heightDepth > 0.60) heightPhase = "down";
-          else if (heightDepth < 0.40) heightPhase = "up";
-        } else if (this.baselineHeight) {
-          // Not enough range yet, use baseline
-          const distFromBase = Math.abs(currentHeight - this.baselineHeight);
-          heightDepth = Math.min(distFromBase / (torsoLength * 0.5), 1.0);
-          if (currentHeight > this.baselineHeight + torsoLength * 0.15) heightPhase = "down";
-          else if (currentHeight < this.baselineHeight - torsoLength * 0.05) heightPhase = "up";
-        }
+        const sorted = [...this.heightHistory].sort((a, b) => a - b);
+        // 15th percentile = up position (highest on screen = smallest y)
+        this.upPositionY = sorted[Math.floor(sorted.length * 0.15)];
+        // 85th percentile = down position (lowest on screen = largest y)
+        this.downPositionY = sorted[Math.floor(sorted.length * 0.85)];
+      } else {
+        // Not enough history yet: use current as initial up estimate
+        this.upPositionY = Math.min(this.upPositionY ?? Infinity, currentHeight);
       }
     }
 
-    // ===== Angle-based detection =====
+    // ===== Height-based phase detection with hysteresis =====
+    let heightPhase = null;
+    let heightDepth = 0.0;
+
+    if (currentHeight !== null && this.upPositionY !== null) {
+      const drop = currentHeight - this.upPositionY;
+      const range = Math.max((this.downPositionY || currentHeight) - this.upPositionY, torsoLength * 0.25);
+      
+      // Normalize depth: 0 = up, 1 = down
+      heightDepth = Math.max(0, Math.min(1, drop / range));
+
+      const downThreshold = torsoLength * this.downDropRatio;
+      const upThreshold = torsoLength * this.upDropRatio;
+
+      if (drop > downThreshold) {
+        heightPhase = "down";
+      } else if (drop < upThreshold) {
+        heightPhase = "up";
+      }
+      // In between: null → hysteresis keeps current phase
+    }
+
+    // ===== Angle-based detection (fallback / confirmation) =====
     let anglePhase = null;
-    let angleDepth = 0.5;
+    let angleDepth = 0.0;
+
+    const calcAngleDepth = (angle) => {
+      // Map 150° (up, straight arms) → 0.0, 95° (down, bent arms) → 1.0
+      const raw = (this.pushupUpAngle - angle) / (this.pushupUpAngle - this.pushupDownAngle);
+      return Math.max(0, Math.min(1, raw));
+    };
 
     if (ls && le && lw) {
       const leftAngle = this.angle(ls, le, lw);
-      angleDepth = Math.min(Math.max((this.pushupUpAngle - leftAngle) / (this.pushupUpAngle - this.pushupDownAngle), 1), 0);
+      angleDepth = calcAngleDepth(leftAngle);
       if (leftAngle < this.pushupDownAngle) anglePhase = "down";
       else if (leftAngle > this.pushupUpAngle) anglePhase = "up";
     } else if (rs && re && rw) {
       const rightAngle = this.angle(rs, re, rw);
-      angleDepth = Math.min(Math.max((this.pushupUpAngle - rightAngle) / (this.pushupUpAngle - this.pushupDownAngle), 1), 0);
+      angleDepth = calcAngleDepth(rightAngle);
       if (rightAngle < this.pushupDownAngle) anglePhase = "down";
       else if (rightAngle > this.pushupUpAngle) anglePhase = "up";
     }
 
-    // ===== Fuse methods =====
+    // ===== Fuse methods: height is primary, angle confirms =====
     let newPhase = this.phase;
-    let newDepth = 0.5;
+    let newDepth = 0.0;
 
-    if (heightPhase && anglePhase) {
-      newPhase = heightPhase === anglePhase ? heightPhase : 
-                 (heightDepth > 0.5 ? "down" : "up");
-      newDepth = (heightDepth + angleDepth) / 2;
-    } else {
-      newPhase = heightPhase || anglePhase || this.phase;
-      newDepth = heightDepth !== 0.5 ? heightDepth : angleDepth;
+    if (heightPhase) {
+      // Height method has a clear signal
+      newPhase = heightPhase;
+      newDepth = heightDepth;
+    } else if (anglePhase) {
+      // Height is ambiguous, angle has a clear signal
+      newPhase = anglePhase;
+      newDepth = angleDepth;
     }
+    // If neither has a clear signal: keep current phase (hysteresis)
 
-    // ===== Phase locking to prevent jitter =====
-    if (newPhase !== this.phase && this.phaseLockFrames < this.minPhaseLock) {
-      this.phaseLockFrames++;
-      newPhase = this.phase; // Stay in current phase until lock expires
-    } else {
-      this.phaseLockFrames = 0;
-    }
-
-    // ===== Temporal majority filter (3 frames) =====
-    this.phaseHistory.push(newPhase);
-    if (this.phaseHistory.length > 3) this.phaseHistory.shift();
-
-    const counts = {};
-    this.phaseHistory.forEach((p) => {
-      if (p && p !== "unknown") counts[p] = (counts[p] || 0) + 1;
-    });
-
-    let smoothed = this.phase;
-    if (Object.keys(counts).length > 0) {
-      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-      if (sorted[0][1] >= 2) smoothed = sorted[0][0];
-    }
-
-    // ===== Rep counting =====
-    if (this.lastPhase === "down" && smoothed === "up") {
+    // ===== Rep counting: only on confirmed down → up transition =====
+    if (this.lastPhase === "down" && newPhase === "up") {
       this.repCount++;
-      this.phaseLockFrames = 0;
     }
 
-    if (smoothed === "down" || smoothed === "up") {
-      this.lastPhase = smoothed;
+    // Update lastPhase only when we have a real phase (not unknown)
+    if (newPhase === "down" || newPhase === "up") {
+      this.lastPhase = newPhase;
     }
-    this.phase = smoothed;
+    this.phase = newPhase;
     this.depthRatio = newDepth;
   }
 
   detectReady(keypoints) {
     const visible = keypoints.filter((k) => k.score > this.minConfidence);
-
-    if (visible.length < 4) {
+    if (visible.length < 3) {
       this.readyFrames = Math.max(0, this.readyFrames - 1);
       if (this.readyFrames < this.readyLostThreshold) this.isReady = false;
       return;
@@ -458,15 +384,15 @@ class PoseDetector {
     const shoulderY = ls && rs ? (ls.y + rs.y) / 2 : (ls || rs).y;
     const hipY = lh && rh ? (lh.y + rh.y) / 2 : (lh || rh).y;
 
-    // Relaxed horizontal alignment check
-    const bodyHorizontal = Math.abs(shoulderY - hipY) < h * 0.32;
+    // Relaxed: shoulders and hips within 40% of canvas height
+    const bodyHorizontal = Math.abs(shoulderY - hipY) < h * 0.40;
 
     if (bodyHorizontal) {
       this.readyFrames++;
       if (this.readyFrames >= this.readyThreshold) this.isReady = true;
     } else {
       this.readyFrames = Math.max(0, this.readyFrames - 1);
-      if (this.readyFrames < Math.floor(this.readyThreshold * 0.4)) {
+      if (this.readyFrames < Math.floor(this.readyThreshold * 0.5)) {
         this.isReady = false;
       }
     }
@@ -487,6 +413,12 @@ class PoseDetector {
     return kp && kp.score >= this.minConfidence ? kp : null;
   }
 
+  // Get keypoint for drawing (lower threshold)
+  getKPDraw(keypoints, name) {
+    const kp = keypoints.find((k) => k.name === name);
+    return kp && kp.score >= this.drawConfidence ? kp : null;
+  }
+
   drawFrame(keypoints) {
     const ctx = this.ctx;
     const w = this.canvas.width;
@@ -501,19 +433,15 @@ class PoseDetector {
     ctx.drawImage(this.video, 0, 0, w, h);
     ctx.restore();
 
-    if (!keypoints || !this.isReady) {
-      const overlayText = !keypoints
-        ? "No Body Detected"
-        : "Get into Push-Up Position";
-      this.drawOverlay(overlayText, "rgba(239, 68, 68, 0.85)");
-      this.drawTrackingQuality(w, h, 0);
+    if (!keypoints) {
+      this.drawOverlay("No Body Detected", "rgba(239, 68, 68, 0.85)");
       return;
     }
 
     const mirrored = keypoints.map((k) => ({ ...k, x: w - k.x }));
     this.drawSkeleton(mirrored);
 
-    // Rep Counter Display
+    // Rep Counter
     ctx.save();
     ctx.fillStyle = "rgba(0,0,0,0.65)";
     ctx.beginPath();
@@ -528,7 +456,12 @@ class PoseDetector {
     ctx.fillText("REPS", 54, 58);
     ctx.restore();
 
-    // Ready Status Pill
+    if (!this.isReady) {
+      this.drawOverlay("Get into Push-Up Position", "rgba(234, 179, 8, 0.85)");
+      return;
+    }
+
+    // Ready pill
     ctx.save();
     ctx.fillStyle = "rgba(34, 197, 94, 0.9)";
     ctx.beginPath();
@@ -542,86 +475,67 @@ class PoseDetector {
 
     // ===== DEPTH GAUGE (right side) =====
     const gaugeX = w - 24;
-    const gaugeY = h / 2 - 60;
-    const gaugeH = 120;
-    const gaugeW = 12;
+    const gaugeY = h / 2 - 70;
+    const gaugeH = 140;
+    const gaugeW = 14;
 
-    // Background
     ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    // Background track
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
     ctx.beginPath();
-    ctx.roundRect(gaugeX - gaugeW/2, gaugeY, gaugeW, gaugeH, 6);
+    ctx.roundRect(gaugeX - gaugeW/2, gaugeY, gaugeW, gaugeH, 7);
     ctx.fill();
 
-    // Fill
+    // Fill from bottom up
     const fillH = gaugeH * this.depthRatio;
     const fillY = gaugeY + gaugeH - fillH;
     const fillColor = this.phase === "down" ? "#3b82f6" : 
-                      this.phase === "up" ? "#22c55e" : "#a1a1aa";
+                      this.phase === "up" ? "#22c55e" : "#71717a";
     ctx.fillStyle = fillColor;
     ctx.beginPath();
-    ctx.roundRect(gaugeX - gaugeW/2, fillY, gaugeW, fillH, 6);
+    ctx.roundRect(gaugeX - gaugeW/2, fillY, gaugeW, fillH, 7);
     ctx.fill();
 
+    // Target line for "down"
+    const downLineY = gaugeY + gaugeH * 0.62;
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(gaugeX - gaugeW/2 - 4, downLineY);
+    ctx.lineTo(gaugeX + gaugeW/2 + 4, downLineY);
+    ctx.stroke();
+
     // Labels
-    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
     ctx.font = "bold 9px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("UP", gaugeX, gaugeY - 6);
-    ctx.fillText("DOWN", gaugeX, gaugeY + gaugeH + 12);
+    ctx.fillText("UP", gaugeX, gaugeY - 8);
+    ctx.fillText("DOWN", gaugeX, gaugeY + gaugeH + 14);
     ctx.restore();
 
-    // ===== COACHING ARROW =====
+    // ===== COACHING TEXT =====
     const arrowText = this.phase === "up" ? "▼ PUSH DOWN" : 
                       this.phase === "down" ? "▲ PUSH UP" : "";
     if (arrowText) {
       ctx.save();
-      const arrowColor = this.phase === "up" ? "#3b82f6" : "#22c55e";
+      const arrowColor = this.phase === "up" ? "#60a5fa" : "#4ade80";
       ctx.fillStyle = arrowColor;
-      ctx.font = "bold 18px sans-serif";
+      ctx.font = "bold 20px sans-serif";
       ctx.textAlign = "center";
-      ctx.shadowColor = "rgba(0,0,0,0.8)";
-      ctx.shadowBlur = 8;
-      ctx.fillText(arrowText, w / 2, h / 2 + 40);
+      ctx.shadowColor = "rgba(0,0,0,0.9)";
+      ctx.shadowBlur = 10;
+      ctx.fillText(arrowText, w / 2, h / 2 + 50);
       ctx.restore();
     }
 
-    // Tracking quality indicator
-    this.drawTrackingQuality(w, h, this.trackingQuality);
-
     // Phase text
-    const phaseColor =
-      this.phase === "down"
-        ? "#3b82f6"
-        : this.phase === "up"
-        ? "#22c55e"
-        : "#a1a1aa";
+    const phaseColor = this.phase === "down" ? "#3b82f6" : 
+                       this.phase === "up" ? "#22c55e" : "#a1a1aa";
     ctx.save();
     ctx.fillStyle = phaseColor;
     ctx.font = "bold 16px sans-serif";
     ctx.textAlign = "left";
     ctx.fillText(this.phase.toUpperCase(), 16, h - 20);
-    ctx.restore();
-  }
-
-  drawTrackingQuality(w, h, quality) {
-    const ctx = this.ctx;
-    const barW = 60;
-    const barH = 4;
-    const x = w - barW - 14;
-    const y = h - 14;
-
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
-    ctx.beginPath();
-    ctx.roundRect(x, y, barW, barH, 2);
-    ctx.fill();
-
-    const color = quality > 0.7 ? "#22c55e" : quality > 0.4 ? "#eab308" : "#ef4444";
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(x, y, barW * quality, barH, 2);
-    ctx.fill();
     ctx.restore();
   }
 
@@ -642,13 +556,13 @@ class PoseDetector {
       ["right_knee", "right_ankle"],
     ];
 
-    const lineColor = this.phase === "down" ? "#60a5fa" : 
-                      this.phase === "up" ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.3)";
+    const lineColor = this.phase === "down" ? "rgba(96, 165, 250, 0.9)" : 
+                      this.phase === "up" ? "rgba(255, 255, 255, 0.7)" : "rgba(255, 255, 255, 0.35)";
 
     connections.forEach(([aName, bName]) => {
-      const a = keypoints.find((k) => k.name === aName);
-      const b = keypoints.find((k) => k.name === bName);
-      if (a && b && a.score >= this.minConfidence && b.score >= this.minConfidence) {
+      const a = this.getKPDraw(keypoints, aName);
+      const b = this.getKPDraw(keypoints, bName);
+      if (a && b) {
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
@@ -660,7 +574,7 @@ class PoseDetector {
     });
 
     keypoints.forEach((kp) => {
-      if (kp.score >= this.minConfidence) {
+      if (kp.score >= this.drawConfidence) {
         ctx.beginPath();
         ctx.arc(kp.x, kp.y, 4, 0, Math.PI * 2);
         ctx.fillStyle = this.phase === "down" ? "#60a5fa" : "#3b82f6";
@@ -674,7 +588,7 @@ class PoseDetector {
     const w = this.canvas.width;
     const h = this.canvas.height;
     ctx.save();
-    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
     ctx.fillRect(0, 0, w, h);
     ctx.fillStyle = color || "#ffffff";
     ctx.font = "600 16px sans-serif";
@@ -687,15 +601,13 @@ class PoseDetector {
     this.repCount = 0;
     this.phase = "up";
     this.lastPhase = "up";
-    this.phaseHistory = [];
-    this.phaseLockFrames = 0;
     this.heightHistory = [];
-    this.baselineHeight = null;
+    this.upPositionY = null;
+    this.downPositionY = null;
     this.isReady = false;
     this.readyFrames = 0;
     this.lostFrames = 0;
     this.lastGoodKeypoints = null;
-    this.trackingQuality = 1.0;
     this.depthRatio = 0.0;
     this.smoothedKeypoints = null;
   }
