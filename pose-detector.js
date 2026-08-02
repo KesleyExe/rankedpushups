@@ -1,4 +1,8 @@
-//PoseDetector - TensorFlow.js MoveNet for Push-Up Detection
+/**
+ * PoseDetector - TensorFlow.js MoveNet for Push-Up Detection
+ * v3.4: Added jitter debouncing, strict pixel minimums, and longer calibration
+ *       windows to prevent ghost reps while laying still.
+ */
 
 class PoseDetector {
   constructor() {
@@ -17,7 +21,7 @@ class PoseDetector {
     
     // Height tracking
     this.heightHistory = [];
-    this.heightWindow = 25;
+    this.heightWindow = 90;    // Increased to ~3 seconds to prevent instant false calibration
     this.upPositionY = null;   // Calibrated UP position (smallest y = highest on screen)
     this.downPositionY = null; // Calibrated DOWN position (largest y = lowest on screen)
     
@@ -51,6 +55,11 @@ class PoseDetector {
 
     // Depth gauge (0.0 = up, 1.0 = down)
     this.depthRatio = 0.0;
+
+    // Debouncing (Anti-jitter)
+    this.pendingPhase = "unknown";
+    this.pendingFrames = 0;
+    this.requiredHoldFrames = 4; // Must hold a pose for 4 consecutive frames to register
 
     this.status = "idle";
     this.errorMessage = "";
@@ -264,7 +273,8 @@ class PoseDetector {
     if (hasShoulder && hasHip) {
       const sY = ls && rs ? (ls.y + rs.y) / 2 : (ls || rs).y;
       const hY = lh && rh ? (lh.y + rh.y) / 2 : (lh || rh).y;
-      torsoLength = Math.max(Math.abs(hY - sY), 50);
+      // Increased minimum torso length from 50 to 100 to prevent tiny pixel thresholds
+      torsoLength = Math.max(Math.abs(hY - sY), 100); 
     }
 
     // ===== Current shoulder height =====
@@ -277,14 +287,11 @@ class PoseDetector {
       this.heightHistory.push(currentHeight);
       if (this.heightHistory.length > this.heightWindow) this.heightHistory.shift();
 
-      if (this.heightHistory.length >= 5) {
+      if (this.heightHistory.length >= 10) { // Require slightly more history before math
         const sorted = [...this.heightHistory].sort((a, b) => a - b);
-        // 15th percentile = up position (highest on screen = smallest y)
         this.upPositionY = sorted[Math.floor(sorted.length * 0.15)];
-        // 85th percentile = down position (lowest on screen = largest y)
         this.downPositionY = sorted[Math.floor(sorted.length * 0.85)];
       } else {
-        // Not enough history yet: use current as initial up estimate
         this.upPositionY = Math.min(this.upPositionY ?? Infinity, currentHeight);
       }
     }
@@ -297,10 +304,10 @@ class PoseDetector {
       const drop = currentHeight - this.upPositionY;
       const range = Math.max((this.downPositionY || currentHeight) - this.upPositionY, torsoLength * 0.25);
       
-      // Normalize depth: 0 = up, 1 = down
       heightDepth = Math.max(0, Math.min(1, drop / range));
 
-      const downThreshold = torsoLength * this.downDropRatio;
+      // Absolute pixel minimums (e.g., must drop at least 35 pixels no matter what)
+      const downThreshold = Math.max(torsoLength * this.downDropRatio, 35);
       const upThreshold = torsoLength * this.upDropRatio;
 
       if (drop > downThreshold) {
@@ -308,7 +315,6 @@ class PoseDetector {
       } else if (drop < upThreshold) {
         heightPhase = "up";
       }
-      // In between: null → hysteresis keeps current phase
     }
 
     // ===== Angle-based detection (fallback / confirmation) =====
@@ -316,7 +322,6 @@ class PoseDetector {
     let angleDepth = 0.0;
 
     const calcAngleDepth = (angle) => {
-      // Map 150° (up, straight arms) → 0.0, 95° (down, bent arms) → 1.0
       const raw = (this.pushupUpAngle - angle) / (this.pushupUpAngle - this.pushupDownAngle);
       return Math.max(0, Math.min(1, raw));
     };
@@ -333,31 +338,45 @@ class PoseDetector {
       else if (rightAngle > this.pushupUpAngle) anglePhase = "up";
     }
 
-    // ===== Fuse methods: height is primary, angle confirms =====
-    let newPhase = this.phase;
+    // ===== Fuse methods =====
+    let rawNewPhase = this.phase;
     let newDepth = 0.0;
 
     if (heightPhase) {
-      // Height method has a clear signal
-      newPhase = heightPhase;
+      rawNewPhase = heightPhase;
       newDepth = heightDepth;
     } else if (anglePhase) {
-      // Height is ambiguous, angle has a clear signal
-      newPhase = anglePhase;
+      rawNewPhase = anglePhase;
       newDepth = angleDepth;
     }
-    // If neither has a clear signal: keep current phase (hysteresis)
 
-    // ===== Rep counting: only on confirmed down → up transition =====
-    if (this.lastPhase === "down" && newPhase === "up") {
-      this.repCount++;
+    // ===== Debouncing (Hold to Confirm Phase) =====
+    // Prevents a single frame of jitter from counting as a pushup
+    if (rawNewPhase !== this.phase && rawNewPhase !== "unknown") {
+      if (rawNewPhase === this.pendingPhase) {
+        this.pendingFrames++;
+        if (this.pendingFrames >= this.requiredHoldFrames) {
+          
+          // Phase is confirmed, check for rep
+          if (this.lastPhase === "down" && rawNewPhase === "up") {
+            this.repCount++;
+          }
+          
+          this.lastPhase = rawNewPhase;
+          this.phase = rawNewPhase;
+          this.pendingFrames = 0; // Reset
+        }
+      } else {
+        // Started seeing a new phase
+        this.pendingPhase = rawNewPhase;
+        this.pendingFrames = 1;
+      }
+    } else {
+      // Either phase hasn't changed, or phase is unknown
+      this.pendingFrames = 0; 
     }
 
-    // Update lastPhase only when we have a real phase (not unknown)
-    if (newPhase === "down" || newPhase === "up") {
-      this.lastPhase = newPhase;
-    }
-    this.phase = newPhase;
+    // Update depth instantly for a smooth UI, even if the phase is waiting to debounce
     this.depthRatio = newDepth;
   }
 
@@ -610,6 +629,8 @@ class PoseDetector {
     this.lastGoodKeypoints = null;
     this.depthRatio = 0.0;
     this.smoothedKeypoints = null;
+    this.pendingPhase = "unknown";
+    this.pendingFrames = 0;
   }
 }
 
