@@ -1,7 +1,7 @@
 /**
  * PoseDetector - TensorFlow.js MoveNet for Push-Up Detection
- * v3.4: Added jitter debouncing, strict pixel minimums, and longer calibration
- *       windows to prevent ghost reps while laying still.
+ * v4.0: Bulletproof Edition. Features Center-of-Mass opponent filtering, 
+ *       Anchor Peak calibration to prevent resting ghost-reps, and strict drop minimums.
  */
 
 class PoseDetector {
@@ -16,20 +16,21 @@ class PoseDetector {
 
     // Push-up tracking state
     this.repCount = 0;
-    this.phase = "up";         // "up", "down", or "unknown"
-    this.lastPhase = "up";     // Last confirmed phase (for rep counting)
+    this.phase = "up";         
+    this.lastPhase = "up";     
     
-    // Height tracking
-    this.heightHistory = [];
-    this.heightWindow = 90;    // Increased to ~3 seconds to prevent instant false calibration
-    this.upPositionY = null;   // Calibrated UP position (smallest y = highest on screen)
-    this.downPositionY = null; // Calibrated DOWN position (largest y = lowest on screen)
+    // Anchor Peak Calibration (Replaces flawed rolling history)
+    this.establishedUpY = null;   // The highest confirmed point of the pushup
     
+    // Anti-Swap (Opponent filtering)
+    this.lastCenter = null;
+    this.swapLockoutFrames = 0;
+
     // Ready detection
     this.isReady = false;
     this.readyFrames = 0;
-    this.readyThreshold = 6;      // ~0.2s at 30fps
-    this.readyLostThreshold = 4;  // Brief dropouts allowed
+    this.readyThreshold = 6;      
+    this.readyLostThreshold = 4;  
 
     // Tracking resilience
     this.lostFrames = 0;
@@ -38,14 +39,14 @@ class PoseDetector {
 
     // Smoothing
     this.smoothedKeypoints = null;
-    this.alpha = 0.35;  // Slightly more smoothing for stability
+    this.alpha = 0.35;  
 
     // Confidence thresholds
-    this.minConfidence = 0.18;    // For logic (pushup counting, ready check)
-    this.drawConfidence = 0.10; // For visual skeleton (draw even faint detections)
-    this.minPoseScore = 0.15;   // Detector-level threshold
+    this.minConfidence = 0.18;    
+    this.drawConfidence = 0.10; 
+    this.minPoseScore = 0.15;   
     
-    // Pushup thresholds (as fraction of torso length)
+    // Pushup thresholds
     this.downDropRatio = 0.38;  // Must drop 38% of torso to register "down"
     this.upDropRatio = 0.12;    // Must be within 12% of torso from top to register "up"
     
@@ -59,7 +60,7 @@ class PoseDetector {
     // Debouncing (Anti-jitter)
     this.pendingPhase = "unknown";
     this.pendingFrames = 0;
-    this.requiredHoldFrames = 4; // Must hold a pose for 4 consecutive frames to register
+    this.requiredHoldFrames = 5; // Must hold a pose for 5 consecutive frames to register
 
     this.status = "idle";
     this.errorMessage = "";
@@ -171,18 +172,35 @@ class PoseDetector {
 
           if (poses.length > 0) {
             const rawKP = poses[0].keypoints;
-            // Need at least 3 body keypoints to attempt tracking
             const bodyNames = ['nose','left_shoulder','right_shoulder','left_hip','right_hip',
                                'left_elbow','right_elbow','left_wrist','right_wrist'];
             const visibleBody = rawKP.filter(k => bodyNames.includes(k.name) && k.score > this.minConfidence);
 
+            // ANTI-SWAP LOGIC: Prevent snapping to opponents in the background
             if (visibleBody.length >= 3) {
+              const cx = visibleBody.reduce((sum, k) => sum + k.x, 0) / visibleBody.length;
+              const cy = visibleBody.reduce((sum, k) => sum + k.y, 0) / visibleBody.length;
+              
+              if (this.lastCenter) {
+                const dist = Math.hypot(cx - this.lastCenter.x, cy - this.lastCenter.y);
+                // If the body teleports more than 25% of the screen in 1 frame, it's a different person
+                if (dist > this.canvas.width * 0.25) {
+                  this.swapLockoutFrames++;
+                  if (this.swapLockoutFrames < 15) { // Wait 0.5s before accepting new person
+                    this.animationId = requestAnimationFrame(detect);
+                    return; 
+                  }
+                }
+              }
+              this.swapLockoutFrames = 0;
+              this.lastCenter = { x: cx, y: cy };
+              
               hasPose = true;
               this.lastGoodKeypoints = rawKP.map(k => ({...k}));
               this.lostFrames = 0;
               kp = this.smoothKeypoints(rawKP);
             } else if (this.lostFrames < this.maxLostFrames && this.lastGoodKeypoints) {
-              // Graceful degradation: blend last good pose with current
+              // Graceful degradation
               this.lostFrames++;
               hasPose = true;
               const decay = Math.max(0, 1 - (this.lostFrames / this.maxLostFrames));
@@ -273,7 +291,6 @@ class PoseDetector {
     if (hasShoulder && hasHip) {
       const sY = ls && rs ? (ls.y + rs.y) / 2 : (ls || rs).y;
       const hY = lh && rh ? (lh.y + rh.y) / 2 : (lh || rh).y;
-      // Increased minimum torso length from 50 to 100 to prevent tiny pixel thresholds
       torsoLength = Math.max(Math.abs(hY - sY), 100); 
     }
 
@@ -282,32 +299,34 @@ class PoseDetector {
     if (ls && rs) currentHeight = (ls.y + rs.y) / 2;
     else if (ls || rs) currentHeight = (ls || rs).y;
 
-    // ===== Calibrate up/down positions from history =====
+    // ===== Anchor Peak Calibration =====
     if (currentHeight !== null) {
-      this.heightHistory.push(currentHeight);
-      if (this.heightHistory.length > this.heightWindow) this.heightHistory.shift();
-
-      if (this.heightHistory.length >= 10) { // Require slightly more history before math
-        const sorted = [...this.heightHistory].sort((a, b) => a - b);
-        this.upPositionY = sorted[Math.floor(sorted.length * 0.15)];
-        this.downPositionY = sorted[Math.floor(sorted.length * 0.85)];
+      if (this.establishedUpY === null) {
+        this.establishedUpY = currentHeight;
       } else {
-        this.upPositionY = Math.min(this.upPositionY ?? Infinity, currentHeight);
+        // If user pushes higher than before, instantly adopt the new height
+        if (currentHeight < this.establishedUpY) {
+          this.establishedUpY = currentHeight;
+        } 
+        // Slowly track downward drift to handle natural posture fatigue over time
+        else if (this.phase === "up" || this.phase === "unknown") {
+          this.establishedUpY = this.establishedUpY * 0.98 + currentHeight * 0.02;
+        }
       }
     }
 
-    // ===== Height-based phase detection with hysteresis =====
+    // ===== Height-based phase detection =====
     let heightPhase = null;
     let heightDepth = 0.0;
 
-    if (currentHeight !== null && this.upPositionY !== null) {
-      const drop = currentHeight - this.upPositionY;
-      const range = Math.max((this.downPositionY || currentHeight) - this.upPositionY, torsoLength * 0.25);
+    if (currentHeight !== null && this.establishedUpY !== null) {
+      const drop = currentHeight - this.establishedUpY;
+      const range = torsoLength * 0.45; // Assumed max physical drop capability
       
       heightDepth = Math.max(0, Math.min(1, drop / range));
 
-      // Absolute pixel minimums (e.g., must drop at least 35 pixels no matter what)
-      const downThreshold = Math.max(torsoLength * this.downDropRatio, 35);
+      // Strict minimum drop of 45 pixels - impossible to trigger by laying on floor
+      const downThreshold = Math.max(torsoLength * this.downDropRatio, 45); 
       const upThreshold = torsoLength * this.upDropRatio;
 
       if (drop > downThreshold) {
@@ -351,32 +370,27 @@ class PoseDetector {
     }
 
     // ===== Debouncing (Hold to Confirm Phase) =====
-    // Prevents a single frame of jitter from counting as a pushup
     if (rawNewPhase !== this.phase && rawNewPhase !== "unknown") {
       if (rawNewPhase === this.pendingPhase) {
         this.pendingFrames++;
         if (this.pendingFrames >= this.requiredHoldFrames) {
           
-          // Phase is confirmed, check for rep
           if (this.lastPhase === "down" && rawNewPhase === "up") {
             this.repCount++;
           }
           
           this.lastPhase = rawNewPhase;
           this.phase = rawNewPhase;
-          this.pendingFrames = 0; // Reset
+          this.pendingFrames = 0; 
         }
       } else {
-        // Started seeing a new phase
         this.pendingPhase = rawNewPhase;
         this.pendingFrames = 1;
       }
     } else {
-      // Either phase hasn't changed, or phase is unknown
       this.pendingFrames = 0; 
     }
 
-    // Update depth instantly for a smooth UI, even if the phase is waiting to debounce
     this.depthRatio = newDepth;
   }
 
@@ -403,7 +417,6 @@ class PoseDetector {
     const shoulderY = ls && rs ? (ls.y + rs.y) / 2 : (ls || rs).y;
     const hipY = lh && rh ? (lh.y + rh.y) / 2 : (lh || rh).y;
 
-    // Relaxed: shoulders and hips within 40% of canvas height
     const bodyHorizontal = Math.abs(shoulderY - hipY) < h * 0.40;
 
     if (bodyHorizontal) {
@@ -432,7 +445,6 @@ class PoseDetector {
     return kp && kp.score >= this.minConfidence ? kp : null;
   }
 
-  // Get keypoint for drawing (lower threshold)
   getKPDraw(keypoints, name) {
     const kp = keypoints.find((k) => k.name === name);
     return kp && kp.score >= this.drawConfidence ? kp : null;
@@ -445,7 +457,6 @@ class PoseDetector {
 
     ctx.clearRect(0, 0, w, h);
 
-    // Draw video feed mirrored
     ctx.save();
     ctx.translate(w, 0);
     ctx.scale(-1, 1);
@@ -460,7 +471,6 @@ class PoseDetector {
     const mirrored = keypoints.map((k) => ({ ...k, x: w - k.x }));
     this.drawSkeleton(mirrored);
 
-    // Rep Counter
     ctx.save();
     ctx.fillStyle = "rgba(0,0,0,0.65)";
     ctx.beginPath();
@@ -480,7 +490,6 @@ class PoseDetector {
       return;
     }
 
-    // Ready pill
     ctx.save();
     ctx.fillStyle = "rgba(34, 197, 94, 0.9)";
     ctx.beginPath();
@@ -492,20 +501,17 @@ class PoseDetector {
     ctx.fillText("READY", w - 30, 33);
     ctx.restore();
 
-    // ===== DEPTH GAUGE (right side) =====
     const gaugeX = w - 24;
     const gaugeY = h / 2 - 70;
     const gaugeH = 140;
     const gaugeW = 14;
 
     ctx.save();
-    // Background track
     ctx.fillStyle = "rgba(0,0,0,0.45)";
     ctx.beginPath();
     ctx.roundRect(gaugeX - gaugeW/2, gaugeY, gaugeW, gaugeH, 7);
     ctx.fill();
 
-    // Fill from bottom up
     const fillH = gaugeH * this.depthRatio;
     const fillY = gaugeY + gaugeH - fillH;
     const fillColor = this.phase === "down" ? "#3b82f6" : 
@@ -515,7 +521,6 @@ class PoseDetector {
     ctx.roundRect(gaugeX - gaugeW/2, fillY, gaugeW, fillH, 7);
     ctx.fill();
 
-    // Target line for "down"
     const downLineY = gaugeY + gaugeH * 0.62;
     ctx.strokeStyle = "rgba(255,255,255,0.5)";
     ctx.lineWidth = 2;
@@ -524,7 +529,6 @@ class PoseDetector {
     ctx.lineTo(gaugeX + gaugeW/2 + 4, downLineY);
     ctx.stroke();
 
-    // Labels
     ctx.fillStyle = "rgba(255,255,255,0.8)";
     ctx.font = "bold 9px sans-serif";
     ctx.textAlign = "center";
@@ -532,7 +536,6 @@ class PoseDetector {
     ctx.fillText("DOWN", gaugeX, gaugeY + gaugeH + 14);
     ctx.restore();
 
-    // ===== COACHING TEXT =====
     const arrowText = this.phase === "up" ? "▼ PUSH DOWN" : 
                       this.phase === "down" ? "▲ PUSH UP" : "";
     if (arrowText) {
@@ -547,7 +550,6 @@ class PoseDetector {
       ctx.restore();
     }
 
-    // Phase text
     const phaseColor = this.phase === "down" ? "#3b82f6" : 
                        this.phase === "up" ? "#22c55e" : "#a1a1aa";
     ctx.save();
@@ -561,18 +563,12 @@ class PoseDetector {
   drawSkeleton(keypoints) {
     const ctx = this.ctx;
     const connections = [
-      ["left_shoulder", "right_shoulder"],
-      ["left_shoulder", "left_elbow"],
-      ["right_shoulder", "right_elbow"],
-      ["left_elbow", "left_wrist"],
-      ["right_elbow", "right_wrist"],
-      ["left_shoulder", "left_hip"],
-      ["right_shoulder", "right_hip"],
-      ["left_hip", "right_hip"],
-      ["left_hip", "left_knee"],
-      ["right_hip", "right_knee"],
-      ["left_knee", "left_ankle"],
-      ["right_knee", "right_ankle"],
+      ["left_shoulder", "right_shoulder"], ["left_shoulder", "left_elbow"],
+      ["right_shoulder", "right_elbow"], ["left_elbow", "left_wrist"],
+      ["right_elbow", "right_wrist"], ["left_shoulder", "left_hip"],
+      ["right_shoulder", "right_hip"], ["left_hip", "right_hip"],
+      ["left_hip", "left_knee"], ["right_hip", "right_knee"],
+      ["left_knee", "left_ankle"], ["right_knee", "right_ankle"],
     ];
 
     const lineColor = this.phase === "down" ? "rgba(96, 165, 250, 0.9)" : 
@@ -620,9 +616,9 @@ class PoseDetector {
     this.repCount = 0;
     this.phase = "up";
     this.lastPhase = "up";
-    this.heightHistory = [];
-    this.upPositionY = null;
-    this.downPositionY = null;
+    this.establishedUpY = null;
+    this.lastCenter = null;
+    this.swapLockoutFrames = 0;
     this.isReady = false;
     this.readyFrames = 0;
     this.lostFrames = 0;
